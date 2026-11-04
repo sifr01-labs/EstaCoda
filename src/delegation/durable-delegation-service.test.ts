@@ -49,6 +49,33 @@ describe("DurableDelegationService", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("admits an explicit report commitment and rejects prose-only or unsafe destinations", () => {
+    const service = new DurableDelegationService({ store, creatorSessionId: () => "parent", workspace: workspace(),
+      config: DEFAULT_DELEGATION_CONFIG, visibleTools: () => [...visibleTools(), tool("file.write", "workspace-write", ["files"])] });
+    const tasks = [{ task: "Inspect source", allowedTools: ["file.read"] }];
+    expect(() => service.create({ toolCallId: "prose-promise", trustedWorkspace: true, tasks,
+      synthesis: { objective: "Save reports/audit.md and read it back." } })).toThrow(/outputPath/);
+    for (const outputPath of ["../outside.md", "/tmp/outside.md", "reports/../../outside.md", "report.sh"]) {
+      expect(() => service.create({ toolCallId: "unsafe-output", trustedWorkspace: true, tasks,
+        synthesis: { objective: "Summarize findings", outputPath } })).toThrow(/outputPath/);
+    }
+    expect(() => service.create({ toolCallId: "conflicting-report", trustedWorkspace: true, tasks,
+      requestContract: { version: 1, objective: "Save original.md", requirements: { skillReferences: [], issues: [], fileOutput: { format: "markdown", path: "original.md" } } },
+      synthesis: { objective: "Summarize findings", outputPath: "other.md" } })).toThrow(/match/);
+    const readOnly = new DurableDelegationService({ store, creatorSessionId: () => "parent", workspace: workspace(),
+      config: DEFAULT_DELEGATION_CONFIG, visibleTools });
+    expect(() => readOnly.create({ toolCallId: "unavailable-delivery", trustedWorkspace: true, tasks,
+      synthesis: { objective: "Summarize findings", outputPath: "report.md" } })).toThrow(/cannot be delivered/);
+    const handle = service.create({ toolCallId: "explicit-report", trustedWorkspace: true, tasks,
+      synthesis: { objective: "Summarize findings", outputPath: "reports/audit.md" } });
+    const task = store.getTask(handle.taskId)!;
+    const delivery = store.listSteps(task.id, task.activePlanRevisionId!).find(step => step.executor.role === "report-delivery")!;
+    expect(delivery.executor.requestContract?.requirements.fileOutput).toMatchObject({ path: "reports/audit.md" });
+    expect(delivery.authorityPolicy.allowedTools).toEqual(["task.result.read", "file.write", "file.read"]);
+    expect(delivery.authorityPolicy.mayCreateChildTasks).toBe(false);
+    expect(delivery.authorityPolicy.riskClassPolicy["workspace-write"]).toBe("runtime_policy");
+  });
+
   it("previews and admits inherited workspace execution under runtime policy without making it retry safe", () => {
     let available = [...visibleTools(), tool("terminal.run", "workspace-write", ["shell-write"]), tool("file.patch", "workspace-write", ["files"])];
     const service = new DurableDelegationService({ store, creatorSessionId: () => "parent", workspace: workspace(),

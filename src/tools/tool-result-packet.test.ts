@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest";
 import { packetizeToolResult, providerVisibleToolResultMaxChars, renderToolResultPacket } from "./tool-result-packet.js";
 
 describe("bounded provider tool feedback", () => {
+  it("delivers complete task pages including middle evidence and uses its own reader for recovery", () => {
+    const content = "a".repeat(9_000) + "MIDDLE FINDING" + "z".repeat(9_000);
+    const result = { ok: true, content, metadata: { nextOffset: content.length } };
+    const packet = packetizeToolResult({ tool: "task.result.read", maxChars: providerVisibleToolResultMaxChars("task.result.read"), result });
+    expect(packet.excerpt).toBe(content);
+    expect(packet.truncated).toBe(false);
+    const clipped = packetizeToolResult({ tool: "task.result.read", maxChars: 500, result });
+    expect(clipped.recoveryHint).toContain("same offset");
+    expect(clipped.recoveryHint).not.toContain("file.read");
+  });
   it("delivers recovery pages intact instead of skipping bytes at nextOffset", () => {
     const page = JSON.stringify({ content: "a".repeat(3000), nextOffset: 3000 });
     const packet = packetizeToolResult({ tool: "session_search", maxChars: providerVisibleToolResultMaxChars("session_search"), result: { ok: true, content: page } });

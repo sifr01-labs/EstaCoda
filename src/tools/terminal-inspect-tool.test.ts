@@ -26,6 +26,21 @@ afterEach(async () => {
 });
 
 describe("terminal.inspect", () => {
+  it("accepts common bounded revision inspection but refuses changing workspaces and unsafe formatting", async () => {
+    const root = await makeTempDir();
+    await execFileAsync("git", ["init", "-q", root]);
+    await writeFile(join(root, "source.txt"), "token handling\n");
+    await execFileAsync("git", ["-C", root, "add", "source.txt"]);
+    await execFileAsync("git", ["-C", root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-qm", "fixture"]);
+    const tool = createTerminalInspectTool({ workspaceRoot: root });
+    for (const argv of [["git", "-C", root, "log", "-1", "--format=%H"], ["git", "rev-parse", "HEAD"], ["git", "log", "-1", "--format=%H%n%cI%n%s"]]) {
+      expect((await tool.run({ argv })).ok).toBe(true);
+    }
+    expect(await tool.run({ argv: ["git", "grep", "-E", "token|auth", "--", "source.txt"] })).toMatchObject({ ok: true, content: expect.stringContaining("token handling") });
+    for (const argv of [["git", "-C", "/", "log", "-1"], ["git", "rev-parse", "--git-dir"], ["git", "log", "--format=%G?"]]) {
+      expect((await tool.run({ argv })).ok).toBe(false);
+    }
+  });
   it("registers as read-only local shell inspection", async () => {
     const root = await makeTempDir();
     const tool = createTerminalInspectTool({ workspaceRoot: root });

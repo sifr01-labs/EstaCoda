@@ -19,6 +19,13 @@ afterEach(async () => {
 });
 
 describe("file.grep", () => {
+  it.each(["", "   "])("treats blank optional max_filesize as omitted: %j", async max_filesize => {
+    const { root, argsPath } = await makeFakeRg("console.log('src/app.ts:1:Hello world');");
+    const result = await createFakeGrep(root, argsPath).run({ pattern: "Hello", max_filesize });
+    expect(result.ok).toBe(true);
+    const args = await readArgs(argsPath);
+    expect(args[args.indexOf("--max-filesize") + 1]).toBe("2M");
+  });
   it("runs content mode with line numbers by default", async () => {
     const { root, argsPath } = await makeFakeRg("console.log('src/app.ts:1:Hello world');");
     const grep = createFakeGrep(root, argsPath);

@@ -2357,8 +2357,7 @@ function deadlineExceededSettlement(
 
 function mayPublishDiagnosticResults(failureRecord: TaskFailure): boolean {
   if (failureRecord.uncertainSideEffects) return false;
-  return failureRecord.class !== "security-deny" &&
-    failureRecord.class !== "approval-required" &&
+  return failureRecord.class !== "approval-required" &&
     failureRecord.class !== "approval-request-missing";
 }
 

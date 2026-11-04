@@ -192,6 +192,7 @@ function validateInput(input: FileGrepInput): GrepValidation {
   }
 
   if (input.type !== undefined && typeof input.type !== "string") return validationError("type must be a string; omit it to search all file types");
+  if (input.max_filesize !== undefined && typeof input.max_filesize !== "string") return validationError("max_filesize must be a string; omit it to use the default limit");
 
   if (input.output_mode !== undefined && input.output_mode !== "content" && input.output_mode !== "files" && input.output_mode !== "count") {
     return validationError("output_mode must be \"content\", \"files\", or \"count\"");
@@ -218,7 +219,7 @@ function validateInput(input: FileGrepInput): GrepValidation {
     offset: Math.max(0, integerOrDefault(input.offset, 0)),
     maxResultChars: clampInteger(input.max_result_chars ?? DEFAULT_GREP_RESULT_CHARS, 1, MAX_GREP_RESULT_CHARS),
     maxLineChars: clampInteger(input.max_line_chars ?? DEFAULT_GREP_LINE_CHARS, 80, MAX_GREP_LINE_CHARS),
-    maxFilesize: input.max_filesize ?? DEFAULT_RG_MAX_FILESIZE,
+    maxFilesize: input.max_filesize?.trim() || DEFAULT_RG_MAX_FILESIZE,
     includeHidden: input.include_hidden === true,
     lineNumbers: input.line_numbers !== false,
     ...(before.value === undefined ? {} : { before: before.value }),

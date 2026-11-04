@@ -693,7 +693,7 @@ describe("TaskScheduler", () => {
       .toMatchObject({ diagnosticResultCount: 1 });
   });
 
-  it("refuses diagnostic publication for security-denied settlements", async () => {
+  it("publishes qualified diagnostics without accepting security-denied attempts", async () => {
     const base = makeStep("security-policy", 0);
     store.createTaskGraph(makeGraph([makeStep("security", 0, {
       retryPolicy: { ...base.retryPolicy, maxAttempts: 1 }
@@ -701,7 +701,7 @@ describe("TaskScheduler", () => {
     const scheduler = makeScheduler(new FakeTaskStepExecutor(() => ({
       outcome: "failed",
       failure: { class: "security-deny", message: "Blocked.", retryable: false, uncertainSideEffects: false },
-      diagnosticResults: [{ kind: "text", content: "must never be published" }]
+      diagnosticResults: [{ kind: "text", content: "Supported observations; blocked operation remains denied." }]
     })));
 
     await scheduler.runOnce();
@@ -710,7 +710,8 @@ describe("TaskScheduler", () => {
       status: "failed",
       failure: { class: "security-deny" }
     });
-    expect(store.listResults("task-alpha")).toEqual([]);
+    expect(store.listResults("task-alpha")).toMatchObject([{ disposition: "diagnostic" }]);
+    expect(store.getStep("step-security")?.status).toBe("failed");
   });
 
   it("retries a failed atomic publication without exposing stale or duplicate Results", async () => {

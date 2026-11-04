@@ -13,8 +13,9 @@ export function commandDetectionSource(source: string): string {
   for (let i = 0; i < source.length;) {
     const char = source[i]!;
     if (/\s/u.test(char)) { if (char === "\n") { segment = []; segments.push(segment); } i++; continue; }
-    // Pipelines, substitutions, redirects and shell grouping require contextual
-    // evaluation. Do not hide potential code flowing into another command.
+    // Preserve pipeline operators, but classify each command's literal operands.
+    // Execution carriers below still disable masking for the entire pipeline.
+    if (char === "|" && source[i + 1] !== "|") { segment = []; segments.push(segment); i++; continue; }
     if ("|&()<>`$\\".includes(char)) return source;
     if (char === ";") { segment = []; segments.push(segment); i++; continue; }
     const start = i;
@@ -53,7 +54,7 @@ export function commandDetectionSource(source: string): string {
       // Only a first, explicitly quoted pattern after simple flag-only options.
       // Other arguments (including credential paths) remain visible.
       let i = 1;
-      while (words[i] && /^-[invHhFlwxc]+$/u.test(words[i]!.value)) i++;
+      while (words[i] && /^-[invHhFElwxc]+$/u.test(words[i]!.value)) i++;
       if (words[i]?.quoted && i < words.length - 1) masks.push(words[i]!);
     }
   }

@@ -5250,6 +5250,18 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(drafts).toHaveLength(Math.min(limit, 3));
   });
 
+  it("preserves the draft without asking for rewrites that cannot repair host feedback", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("Useful independent findings")], toolSteps: [], maxProviderIterations: 8
+    });
+    const result = await runBasicProviderTurn(harness.loop, { validateCompletion: () => ({
+      message: "Uncertain effects from execution call-1 require operator reconciliation.", repairable: false
+    }) });
+    expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+    expect(result.completionValidationFailure).toContain("call-1");
+    expect(result.completionCandidate).toBe("Useful independent findings");
+  });
+
   it("keeps the rejected draft and defect through intervening tool calls, then clears them on acceptance", async () => {
     const draft = "Substantial findings with a citation to correct. " + "Retained evidence. ".repeat(80);
     const searches = [1, 2].map(i => toolExecutionForTool(`search-${i}`, "web.search", `Observed source ${i}`));

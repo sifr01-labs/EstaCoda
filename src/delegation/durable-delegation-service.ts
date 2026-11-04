@@ -1,3 +1,4 @@
+import { deriveRequestRequirements } from "../runtime/request-requirements.js";
 import type { AgentRunLimits } from '../config/run-limits.js';
 import { requestedFileOutputs } from "../contracts/request-requirements.js";
 import { createHash } from "node:crypto";
@@ -228,7 +229,7 @@ export class DurableDelegationService {
     if (request.tasks.length === 0 || request.tasks.length > this.#config.maxBatchTasks) {
       throw new Error(`Durable delegation requires 1-${this.#config.maxBatchTasks} task items.`);
     }
-    const requestContract = request.requestContract === undefined ? undefined : validateDelegatedRequestContract(request.requestContract);
+    let requestContract = request.requestContract === undefined ? undefined : validateDelegatedRequestContract(request.requestContract);
     // An explicit report contract owns its required synthesis step. A model
     // flag cannot disable it; inspection-only delegation retains its semantics.
     if (requestContract?.requirements.research !== undefined && request.synthesis === false) {
@@ -267,6 +268,24 @@ export class DurableDelegationService {
     const creationKey = delegationCreationKey(this.#store.profileId, sessionId, originTurnId, toolCallId);
     const existing = this.#store.getTaskByCreationKey(creationKey);
     const synthesis = resolveDelegationSynthesis(request);
+    if (synthesis?.outputPath !== undefined) {
+      const path = synthesis.outputPath;
+      if (parent !== undefined || typeof path !== "string" || path.length > 240 ||
+          !/^[A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:md|txt)$/u.test(path) || path.split("/").some(part => part === ".." || part === "." || part === "")) {
+        throw new Error("synthesis.outputPath must be a root-task relative workspace .md or .txt path without traversal.");
+      }
+      if (requestContract?.requirements.fileOutput !== undefined && requestContract.requirements.fileOutput.path !== path) {
+        throw new Error("synthesis.outputPath must match the existing user output requirement.");
+      }
+      requestContract ??= { version: 1, objective: synthesis.objective, requirements: { skillReferences: [], issues: [], ...(originTurnId === undefined ? {} : { originTurnId }) } };
+      requestContract = structuredClone(requestContract);
+      requestContract.requirements.fileOutput ??= { format: path.endsWith(".md") ? "markdown" : "text", path };
+    }
+
+    if (synthesis !== undefined && requestContract?.requirements.fileOutput === undefined &&
+        deriveRequestRequirements(synthesis.objective).fileOutput !== undefined) {
+      throw new Error("Synthesis has only result-reading tools. Declare synthesis.outputPath for the promised report, or remove the file promise from its objective.");
+    }
     const localCompletionEligible = parent === undefined && (
       synthesis !== undefined || (tasks.length === 1 && request.synthesis !== false)
     );
@@ -299,6 +318,7 @@ export class DurableDelegationService {
     if (deliveryAuthority !== undefined) allAuthorities.push(deliveryAuthority);
     const taskAuthority = mergeAuthorities(allAuthorities);
     const workerCount = tasks.length;
+    if (synthesis?.outputPath !== undefined && deliveryAuthority === undefined) throw new Error("The promised report cannot be delivered: file.write, file.read and task.result.read must be available to the parent.");
     const hasSynthesis = synthesis !== undefined;
     const executionLimits = existing === null ? delegationExecutionLimits(
       workerCount,

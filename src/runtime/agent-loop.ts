@@ -119,7 +119,7 @@ export type AgentLoopInput = {
     requirements: RequestRequirements;
     /** Host-declared prerequisites; intersected with the session catalog, never authority. */
     requiredTools?: readonly string[];
-    validate?: (text: string, executions: readonly ToolExecutionRecord[]) => string | undefined;
+    validate?: (text: string, executions: readonly ToolExecutionRecord[]) => import("./provider-turn-loop.js").CompletionFeedback | undefined;
   };
   channel: ChannelKind;
   attachments?: ChannelAttachment[];

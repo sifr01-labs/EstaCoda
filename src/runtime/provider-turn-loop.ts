@@ -114,6 +114,12 @@ const PROTECTED_OTP_CONTINUATION_PROMPT = [
   "Call browser.type now with the exact ref, identity, tabRef, protectedInput.kind=one-time-code, and submitRef from the newest browser snapshot so the protected prompt opens and submits locally in this same turn."
 ].join(" ");
 
+/** Host-owned completion feedback. A terminal blocker must not invite prose retries. */
+export type CompletionFeedback = string | { message: string; repairable: boolean };
+function completionFeedbackText(feedback: CompletionFeedback | undefined): string | undefined {
+  return typeof feedback === "string" ? feedback : feedback?.message;
+}
+
 export type ProviderTurnLoopBudgets = {
   maxProviderIterations: number;
   maxProviderToolCalls: number;
@@ -285,7 +291,7 @@ export class ProviderTurnLoop {
   async run(input: {
     /** Trusted host validator; feedback cannot change the tool/authority boundary. */
     completionReadbackPaths?: (executions: readonly ToolExecutionRecord[]) => string[] | undefined;
-    validateCompletion?: (text: string, executions: readonly ToolExecutionRecord[]) => string | undefined;
+    validateCompletion?: (text: string, executions: readonly ToolExecutionRecord[]) => CompletionFeedback | undefined;
     /** Explain a blocked task without executing tools or supervising its checkpoint. */
     diagnosticOnly?: boolean;
     visibleTurnId?: string;
@@ -885,7 +891,7 @@ export class ProviderTurnLoop {
       // the outstanding defect against accumulated evidence before rewarding discovery.
       let unchangedRepair = false;
       if (completionCandidate !== undefined) {
-        const feedback = redactSensitiveText(input.validateCompletion?.(completionCandidate, [...input.toolExecutions, ...providerToolExecutions]) ?? "").slice(0, 6_000) || undefined;
+        const feedback = redactSensitiveText(completionFeedbackText(input.validateCompletion?.(completionCandidate, [...input.toolExecutions, ...providerToolExecutions])) ?? "").slice(0, 6_000) || undefined;
         unchangedRepair = feedback === completionValidationFailure;
         // Repair evidence changes during tool calls, not just at the next final
         // answer. Never keep instructing the model to fix an already settled
@@ -1174,14 +1180,14 @@ export class ProviderTurnLoop {
         execution.response?.content.trim() && !exhausted && terminationCause === "normal" && !input.signal?.aborted &&
         !toolLoopProgress.shouldStop && browserObservation?.shouldStop !== true) {
         const validationFailure = input.validateCompletion(execution.response.content, [...input.toolExecutions, ...providerToolExecutions]);
-        completionValidationFailure = validationFailure === undefined ? undefined : redactSensitiveText(validationFailure).slice(0, 6_000);
+        completionValidationFailure = validationFailure === undefined ? undefined : redactSensitiveText(completionFeedbackText(validationFailure)!).slice(0, 6_000);
         const boundaries = [...input.toolExecutions, ...providerToolExecutions].filter(call => call.decision !== "allow");
         const hasBoundary = boundaries.length > 0;
         const canUseAlternative = boundaries.every(call =>
           ["terminal.run", "terminal.inspect", "execute_code"].includes(call.tool.name) &&
           call.riskClass !== "external-side-effect" && call.executionEffect?.connector === undefined);
         const readbackPaths = hasBoundary ? input.completionReadbackPaths?.([...input.toolExecutions, ...providerToolExecutions]) : undefined;
-        const repair = completionValidationFailure !== undefined && completionRepairs < 2 &&
+        const repair = completionValidationFailure !== undefined && (typeof validationFailure === "string" || validationFailure?.repairable !== false) && completionRepairs < 2 &&
           iteration + consumedProviderIterations < this.#budgets.maxProviderIterations && !input.signal?.aborted &&
           (!hasBoundary || (readbackPaths !== undefined && readbackPaths.length > 0) ||
             (canUseAlternative && activeProviderTools.some(tool => !boundaries.some(call =>

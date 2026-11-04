@@ -279,7 +279,16 @@ export class TaskApprovalService {
           const resolved = resolve(task.workspace.canonicalPath, file.path).replaceAll("\\", "/");
           return [process.platform === "win32" ? resolved.toLowerCase() : resolved];
         });
-        if (!targets.some(target => request.targetKey === `${request.toolName}:path:${target}`)) return "deny";
+        const prefix = `${request.toolName}:path:`;
+        if (!request.targetKey?.startsWith(prefix)) return "deny";
+        // Missing destination directories have no canonical target yet. The tool
+        // reports a workspace-relative key in that case; resolve it against the
+        // same bound root, without changing filesystem/symlink checks at dispatch.
+        const path = request.targetKey.slice(prefix.length);
+        if (path.length === 0) return "deny";
+        const resolved = resolve(task.workspace.canonicalPath, path).replaceAll("\\", "/");
+        const target = process.platform === "win32" ? resolved.toLowerCase() : resolved;
+        if (!targets.includes(target)) return "deny";
       }
     }
     const taskDisposition = task.authorityPolicy.riskClassPolicy[request.riskClass];

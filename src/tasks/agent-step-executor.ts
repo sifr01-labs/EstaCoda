@@ -1,3 +1,6 @@
+import { commandCompletionFeedback } from "../runtime/command-completion-checks.js";
+import { requestedFileOutputs } from "../contracts/request-requirements.js";
+import type { CompletionFeedback } from "../runtime/provider-turn-loop.js";
 import { ProviderAccountingError } from "../providers/provider-executor.js";
 import { inspectPlaintextCredentials } from "../security/plaintext-credential-guard.js";
 import { truncateHistoryContent } from "../prompt/history-content.js";
@@ -273,6 +276,11 @@ export class AgentStepExecutor implements TaskStepExecutor {
         status: "running",
         lastActivityAt: this.#now().toISOString()
       });
+      if (input.step.executor.role === "report-delivery") {
+        const delivered = await this.#deliverReport(input, child);
+        endReason = delivered.outcome === "succeeded" ? "task-step-completed" : "task-step-failed";
+        return delivered;
+      }
       const siblingSubagents = this.#taskStore
         .listSteps(input.task.id, input.step.planRevisionId)
         .filter((step) => step.executor.role === "worker" || step.executor.role === "orchestrator")
@@ -314,32 +322,13 @@ export class AgentStepExecutor implements TaskStepExecutor {
         attemptId: input.attempt.id,
         parentOnEvent: this.#taskProgressSink(input),
         ...(input.step.executor.research === undefined && input.step.executor.requestContract?.requirements.research === undefined &&
-          input.step.executor.role !== "report-delivery" && input.step.executor.role !== "synthesis" ? {} : { stepCompletion: {
+          input.step.executor.role !== "synthesis" ? {} : { stepCompletion: {
           // Dependency reads are assigned by the durable graph, not optional semantic hints.
           requiredTools: input.step.dependsOn.length > 0 ? ["task.result.read"] : [],
           // Parent orchestration and research acceptance are enforced by this executor.
           // Only the delivery Step owns the foreground write/read-back requirement.
-          requirements: {
-            skillReferences: [], issues: [],
-            ...(input.step.executor.role !== "report-delivery" ? {} : {
-              sourceTaskId: input.task.id,
-              fileOutput: input.step.executor.requestContract?.requirements.fileOutput
-            })
-          },
-          ...(input.step.executor.role === "report-delivery" ? {
-            validate: (_text, executions) => {
-              // Feedback uses executor records. Settlement below still requires the
-              // authoritative persisted receipts and exact accepted-result hash.
-              const index = new ExecutionEvidenceIndex();
-              for (const execution of executions) index.record(execution, "delivery-feedback");
-              const requirements = input.step.executor.requestContract?.requirements;
-              const evidence = fileOutputEvidence({ requirements: requirements && { ...requirements, originTurnId: undefined, sourceTaskId: input.task.id },
-                toolExecutions: executions, executionReceipts: index.recordsForTurn("delivery-feedback") });
-              return evidence.satisfied ? undefined : `File delivery is incomplete (${evidence.reason}). Read the complete accepted synthesis with task.result.read, copy it exactly with file.write sourceResult: {taskId, resultId} (omit content), then read the entire file with file.read using only path. Respect overwrite approvals. Do not repeat research.`;
-            }
-          } : {
-            validate: (text, executions) => researchCompletionFailure(input, this.#taskStore, text, executions, this.#now())
-          })
+          requirements: { skillReferences: [], issues: [] },
+          validate: (text, executions) => researchCompletionFailure(input, this.#taskStore, text, executions, this.#now())
         } }),
         inputMetadata: {
           durableTask: true,
@@ -394,7 +383,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
         return { outcome: "failed", failure: taskFailure("approval-required", false), ...metering, ...common };
       }
       if (hasStructuredBlock(response, events)) {
-        return { outcome: "failed", failure: taskFailure("security-deny", false), ...metering, ...common };
+        return { outcome: "failed", failure: taskFailure("security-deny", false), ...safeDiagnosticOutput(response.completionCandidate ?? response.text, response.toolExecutions), ...metering, ...common };
       }
       if (response.providerExecution?.spendDenialReason !== undefined) {
         endReason = "task-step-spending-denied";
@@ -418,24 +407,13 @@ export class AgentStepExecutor implements TaskStepExecutor {
       if (hasUnrecoveredToolFailure(input.step, response.toolExecutions, response.text)) {
         return {
           outcome: "failed",
-          failure: taskFailure("tool-error", true),
+          failure: { ...taskFailure("tool-error", false), uncertainSideEffects: response.toolExecutions.some(execution => execution.settlement?.sideEffectState === "possible") },
           ...safeDiagnosticOutput(response.text, response.toolExecutions),
           ...metering,
           ...common
         };
       }
 
-      if (input.step.executor.role === "report-delivery") {
-        const requirements = input.step.executor.requestContract?.requirements;
-        const evidence = fileOutputEvidence({
-          requirements: requirements === undefined ? undefined : { ...requirements, originTurnId: undefined, sourceTaskId: input.task.id },
-          toolExecutions: response.toolExecutions,
-          executionReceipts: events.filter((event): event is typeof event & ExecutionEvidenceRecord => event.kind === "execution-evidence-recorded")
-        });
-        if (requirements?.fileOutput === undefined || !evidence.satisfied) return {
-          outcome: "failed", failure: { ...taskFailure("evidence-contract-unsatisfied", false), message: `File delivery is incomplete (${evidence.satisfied ? "missing-file-requirement" : evidence.reason}). Inspect the write and read-back evidence.` }, ...metering, ...common
-        };
-      }
       const stopped = response.finalOutcome?.terminationCause;
       if ((stopped !== undefined && stopped !== "normal") || response.completionValidationFailure !== undefined) return {
         outcome: "failed",
@@ -446,7 +424,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
       const evidenceFailure = researchCompletionFailure(input, this.#taskStore, response.text, response.toolExecutions, this.#now());
       if (evidenceFailure !== undefined) return {
         outcome: "failed",
-        failure: { ...taskFailure("evidence-contract-unsatisfied", false), message: evidenceFailure.split(". ")[0] + ". Inspect the preserved draft and validation feedback." },
+        failure: { ...taskFailure("evidence-contract-unsatisfied", false), message: (typeof evidenceFailure === "string" ? evidenceFailure : evidenceFailure.message).split(". ")[0] + ". Inspect the preserved draft and validation feedback." },
         ...safeDiagnosticOutput(response.text, response.toolExecutions), ...metering, ...common
       };
       const grounded = groundResearchResult({ task: input.task, step: input.step, store: this.#taskStore,
@@ -502,6 +480,60 @@ export class AgentStepExecutor implements TaskStepExecutor {
       }
       await child.cleanup().catch(() => undefined);
     }
+  }
+
+  /** Exact export is host work through the normal governed tools, not a model turn. */
+  async #deliverReport(input: TaskStepExecutionInput, child: ChildAgentLoopRuntime): Promise<TaskExecutorSettlement> {
+    const common = { workerSessionId: child.childSessionId, usage: taskUsageFromEntries([]) };
+    const requirements = input.step.executor.requestContract?.requirements;
+    const outputs = requestedFileOutputs(requirements);
+    const sources = this.#taskStore.listResults(input.task.id).filter(result => result.status === "available" &&
+      result.disposition === "accepted" && result.kind === "text" && result.stepId !== undefined && input.step.dependsOn.includes(result.stepId));
+    if (sources.length !== 1 || outputs.length === 0 || outputs.some(output => output.path === undefined)) {
+      return { ...failed("delivery-source-or-target-missing", false), ...common };
+    }
+    const source = sources[0]!;
+    const executions: ToolExecutionRecord[] = [];
+    const turnId = `delivery-${input.attempt.id}`;
+    const evidence = new ExecutionEvidenceIndex();
+    const operations: Array<{ tool: string; input: Record<string, unknown> }> = [
+      { tool: "task.result.read", input: { task_id: input.task.id, result_id: source.id, offset: 0, max_chars: 20_000 } }
+    ];
+    for (const operation of operations) {
+      if (input.signal.aborted) return { outcome: "cancelled", ...common };
+      input.heartbeat();
+      const execution = await child.builtSession.toolExecutor.executeTool({ ...operation, trustedWorkspace: true,
+        sessionId: child.childSessionId, toolCallId: `${turnId}-${executions.length}`, visibleTurnId: turnId,
+        signal: input.signal, requestContract: input.step.executor.requestContract });
+      if (!execution) return { ...failed("delivery-tool-unavailable", false), ...common };
+      executions.push(execution);
+      evidence.record(execution, turnId);
+      const approval = this.#approvalService.takeRequest(input.attempt.id);
+      if (approval) return { outcome: "waiting_for_approval", approval, ...common };
+      for (const approved of this.#approvalService.takeApprovedRequests(input.attempt.id)) this.#approvalService.consumeApproved(input.attempt.id, approved);
+      if (execution.decision !== "allow" || execution.result?.ok !== true) return {
+        outcome: "failed", failure: { ...taskFailure(execution.decision !== "allow" ? "security-deny" : "delivery-tool-error", false),
+          uncertainSideEffects: execution.settlement?.sideEffectState === "possible" }, ...common
+      };
+      if (operation.tool === "task.result.read") {
+        const metadata = execution.result.metadata;
+        if (metadata?.hasMore === true) {
+          const next = metadata.nextOffset;
+          if (typeof next !== "number" || next <= Number(operation.input.offset) || next > source.byteLength) return { ...failed("delivery-page-invalid", false), ...common };
+          operations.push({ tool: "task.result.read", input: { ...operation.input, offset: next } });
+        } else {
+          for (const output of outputs) operations.push(
+            { tool: "file.write", input: { path: output.path, sourceResult: { taskId: input.task.id, resultId: source.id } } },
+            { tool: "file.read", input: { path: output.path } }
+          );
+        }
+      }
+    }
+    const checked = fileOutputEvidence({ requirements: { ...requirements!, originTurnId: undefined, sourceTaskId: input.task.id },
+      toolExecutions: executions, executionReceipts: evidence.recordsForTurn(turnId) });
+    if (!checked.satisfied) return { ...failed("delivery-content-unverified", false), ...common };
+    input.checkpoint({ milestone: "result-captured" });
+    return { outcome: "succeeded", ...common, results: [{ kind: "text", content: `Saved and verified the accepted report: ${outputs.map(output => output.path).join(", ")}.`, summary: "Accepted report exported and verified." }] };
   }
 
   async #attemptRecoveryContext(input: TaskStepExecutionInput): Promise<string> {
@@ -634,6 +666,8 @@ function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string
           : boundText(result.displaySummary, 240)
       };
     });
+  const drafts = store.listResults(task.id).filter(result => result.status === "available" && result.disposition === "diagnostic" && result.stepId !== undefined && dependencyIds.has(result.stepId))
+    .slice(0, MAX_DEPENDENCY_RESULT_REFERENCES).map(result => ({ stepId: result.stepId, disposition: "diagnostic", readInput: { task_id: task.id, result_id: result.id } }));
   const guidance = store.listGuidance(task.id)
     .slice(-MAX_TASK_GUIDANCE_RECORDS_IN_CONTEXT)
     .map((entry) => ({ id: entry.id, guidance: entry.guidance, createdAt: entry.createdAt }));
@@ -654,6 +688,7 @@ function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string
       : `Authorized operator guidance (later entries take precedence without overriding policy):\n${JSON.stringify(guidance)}`,
     ...(synthesisResearchBoundary === undefined ? [] : [synthesisResearchBoundary]),
     ...(partialSynthesis === undefined ? [] : [partialSynthesis]),
+    ...(drafts.length === 0 ? [] : [`Unaccepted drafts available for inspection, not accepted evidence. They may identify successful observations worth independently verifying; preserve failed scope status and do not treat their claims as established: ${JSON.stringify(drafts)}`]),
     references.length === 0
       ? "Dependency results: none."
       : `Dependency result references. To read one, call task.result.read with reference.readInput exactly; it already contains the authorized task_id and result_id. Do not derive task_id from a result handle:\n${JSON.stringify(references)}`
@@ -711,12 +746,22 @@ function partialSynthesisContext(
 function researchCompletionFailure(
   input: TaskStepExecutionInput, store: TaskStore, text: string,
   executions: readonly import("../tools/tool-executor.js").ToolExecutionRecord[], now: Date
-): string | undefined {
+): CompletionFeedback | undefined {
+  const blocked = executions.filter(execution => execution.decision !== "allow");
+  if (blocked.length > 0) return { message: "A denied or pending operation remains recorded. This attempt cannot be accepted; preserve the supported draft and limitations. Do not retry denied operations. Rewriting the report cannot change this disposition.", repairable: false };
+  const checkIndex = new ExecutionEvidenceIndex();
+  for (const execution of executions) checkIndex.record(execution, "step-checks");
+  const checkFailure = commandCompletionFeedback(executions, checkIndex.recordsForTurn("step-checks"));
+  if (checkFailure !== undefined) return checkFailure;
   const grounded = groundResearchResult({ task: input.task, step: input.step, store, text, executions, now });
   if (grounded.failure !== undefined) return `Research evidence needs correction: ${grounded.failure}. ${grounded.feedback ?? "Return the corrected report with observed citations and source limitations."}`;
   // Use the same failure recovery decision before completion and at settlement.
   // A provider must be able to repair required reads before its Attempt ends.
-  if (hasUnrecoveredToolFailure(input.step, executions, text)) return "Research evidence needs correction: unresolved-tool-error. Inspect the failed tool results and obtain missing evidence with allowed tools. Ordinary local research read errors are limitations, not evidence; successful observations must still support the report. Never retry a blocked operation or bypass a denial. Required-source failures, execution-policy denials, and other URL safety blocks remain unresolved.";
+  const unresolved = unresolvedToolFailures(input.step, executions, text);
+  if (unresolved.length > 0) return {
+    message: `Research evidence needs correction: unresolved-tool-error. Unresolved executions: ${unresolved.map(execution => `${execution.toolCallId ?? "unidentified"} (${execution.tool.name}; effects ${execution.settlement?.sideEffectState ?? "unknown"})`).join(", ")}. Obtain missing evidence with allowed tools. Do not retry denied operations. Uncertain effects require inspection or operator recovery; rewriting the report does not settle them.`,
+    repairable: unresolved.every(execution => ["read-only-local", "read-only-network"].includes(execution.riskClass) && execution.decision === "allow")
+  };
   const missing = researchEvidenceFailure(input.step, text, [...executions]);
   return missing === undefined ? undefined : `Research evidence needs correction: ${missing}. Cite evidence observed with the assigned tools; obtain missing evidence or explicitly report the unresolved gap.`;
 }
@@ -908,14 +953,20 @@ function safeDiagnosticOutput(
   toolExecutions: Awaited<ReturnType<ChildAgentLoopRuntime["handle"]>>["toolExecutions"]
 ): { diagnosticResults?: readonly TaskExecutorResultContent[] } {
   if (text.trim().length === 0) return {};
-  // Never republish output associated with a mutating or otherwise privileged action.
-  if (toolExecutions.some((execution) =>
-    execution.riskClass !== "read-only-local" && execution.riskClass !== "read-only-network"
+  if (toolExecutions.some(execution => execution.decision !== "allow") && !toolExecutions.some(execution => execution.decision === "allow" && execution.result?.ok === true)) return {};
+  // Preserve unaccepted drafts from settled local work, including pre-dispatch
+  // denials. Never republish actual privileged output or uncertain mutations.
+  if (toolExecutions.some(execution =>
+    execution.settlement?.sideEffectState === "possible" ||
+    execution.decision === "allow" && !["read-only-local", "read-only-network"].includes(execution.riskClass) &&
+      !(execution.riskClass === "workspace-write" && execution.settlement !== undefined &&
+        ["none", "confirmed"].includes(execution.settlement.sideEffectState))
   )) return {};
+  const sanitized = inspectPlaintextCredentials(text).redactedText;
   return {
     diagnosticResults: [{
       kind: "text",
-      content: text,
+      content: sanitized,
       mimeType: "text/plain; charset=utf-8",
       summary: "Recovered output from a failed Attempt; incomplete and not accepted as the Step result."
     }]
@@ -923,8 +974,27 @@ function safeDiagnosticOutput(
 }
 
 function hasUnrecoveredToolFailure(step: TaskStep, executions: readonly ToolExecutionRecord[], text: string): boolean {
-  return executions.some((execution, index) => (execution.result?.ok === false || isEmptyPassageLookup(execution)) &&
+  return unresolvedToolFailures(step, executions, text).length > 0;
+}
+
+function unresolvedToolFailures(step: TaskStep, executions: readonly ToolExecutionRecord[], text: string): ToolExecutionRecord[] {
+  return executions.filter((execution, index) => (execution.result?.ok === false || isEmptyPassageLookup(execution)) &&
+    !isSettledResearchExperiment(step, execution) &&
     !isLocalResearchReadLimitation(step, execution) && !isRecoveredRead(execution, index, executions) && !isRecoveredPassageLookup(execution, index, executions) && !isRecoveredDeliveryValidation(step, execution, index, executions) && !isAlternativeResearchRead(step, execution, executions, text));
+}
+
+/** A collected local experiment is an observation, not a mandatory check merely
+ * because its tool can write. Explicit verification obligations stay enforced by
+ * commandCompletionFeedback. Unknown mutation effects never qualify. */
+function isSettledResearchExperiment(step: TaskStep, execution: ToolExecutionRecord): boolean {
+  return step.executor.role === "worker" && step.executor.research !== undefined &&
+    execution.decision === "allow" && execution.riskClass === "workspace-write" &&
+    ["terminal.run", "execute_code"].includes(execution.tool.name) &&
+    execution.executionEffect?.connector === undefined &&
+    execution.settlement !== undefined && execution.settlement.sideEffectState !== "possible" &&
+    ["none", "confirmed"].includes(execution.settlement.sideEffectState) &&
+    (execution.settlement.dispatchState === "finished" || execution.settlement.dispatchState === "not_started") &&
+    execution.result?.metadata?.reason !== "unavailable";
 }
 
 /** A failed exploratory read is not an outstanding mutation or proof of missing
@@ -939,11 +1009,11 @@ function isLocalResearchReadLimitation(step: TaskStep, execution: ToolExecutionR
 }
 
 function researchReadLimitations(step: TaskStep, executions: readonly ToolExecutionRecord[]): string {
-  const failed = executions.filter(execution => execution.result?.ok === false && isLocalResearchReadLimitation(step, execution));
+  const failed = executions.filter(execution => execution.result?.ok === false && (isLocalResearchReadLimitation(step, execution) || isSettledResearchExperiment(step, execution)));
   if (failed.length === 0) return "";
   // Do not copy failed arguments, paths or error bodies into a durable result.
   const names = [...new Set(failed.map(execution => execution.tool.name))].sort().join(", ");
-  return `\n\nResearch read limitations: ${failed.length} local read attempt(s) failed (${names}). These attempts are not evidence and remain recorded in the worker history. Acceptance of this report does not establish that every requested source was inspected. Use only successful observations and preserve any unresolved coverage gaps in synthesis.`;
+  return `\n\nExploration limitations: ${failed.length} settled exploratory attempt(s) failed (${names}). These attempts are not evidence and remain recorded in the worker history. Acceptance of this report does not establish that every requested source was inspected. Use only successful observations and preserve any unresolved coverage gaps in synthesis.`;
 }
 
 function isEmptyPassageLookup(execution: ToolExecutionRecord): boolean {

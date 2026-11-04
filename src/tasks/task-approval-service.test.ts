@@ -60,6 +60,9 @@ describe("TaskApprovalService security policy", () => {
       expect(policy.decide({ riskClass: "read-only-local", description: "respond to user prompt", context: { trustedWorkspace: true } })).toBe(decision);
       expect(policy.decide({ riskClass: "destructive-local", description: "unnamed operation", context: { trustedWorkspace: true } })).toBe("deny");
       expect(policy.decide(request)).toBe(decision);
+      expect(policy.decide({ ...request, targetKey: "file.write:path:report.md" })).toBe(decision);
+      expect(policy.decide({ ...request, targetKey: "file.write:path:../report.md" })).toBe("deny");
+      expect(policy.decide({ ...request, targetKey: "file.write:path:other.md" })).toBe("deny");
       expect(policy.decide({ ...request, targetKey: "file.write:path:/workspace/second.txt" })).toBe(decision);
       expect(policy.decide({ ...request, riskClass: "read-only-local", toolName: "file.read", targetKey: "file.read:path:/workspace/second.txt" })).toBe(decision);
       expect(policy.decide({ ...request, targetKey: "file.write:path:/outside/second.txt" })).toBe("deny");

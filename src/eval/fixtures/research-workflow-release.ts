@@ -42,9 +42,10 @@ export async function measureResearchWorkflow(options: {
     const final = h.store.listResults(task.id).find((result) => result.stepId === synthesis.id && result.disposition === "accepted")!;
     const content = (await resultService.readText({ taskId: task.id, resultId: final.id, sessionId: h.runtime.sessionId })).content;
     await h.restart();
-    h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: final.id }), nativeCall("file_write", { path: "report.md", content }), nativeCall("file_read", { path: "report.md" }), answer("Saved report.md."));
+    const callsBeforeDelivery = h.requests.length;
     scheduler = new TaskScheduler({ store: h.store, resultService: new TaskResultService({ store: h.store, profileId: "baseline", sessionDb: h.sessionDb, contentRoot: resolveProfileStateHome({ homeDir: h.homeDir, profileId: "baseline" }).taskResultsPath }), ownerId: "release-fixture", limits: { maxProfileConcurrentAttempts: 1 }, resolveExecutor: () => h.runtime.taskAgentExecutor });
     assert.equal((await scheduler.runOnce()).completed, 1, JSON.stringify(h.scriptErrors));
+    assert.equal(h.requests.length, callsBeforeDelivery);
     assert.equal(h.store.getTask(task.id)?.status, "completed");
     assert.equal(await readFile(join(h.workspaceRoot, "report.md"), "utf8"), content);
     assert.equal(h.store.listTasks().length, 1); assert.equal(h.searches.length, 3);

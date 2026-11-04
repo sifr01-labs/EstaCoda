@@ -1,6 +1,7 @@
+import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { createWebTools } from "../tools/web-tools.js";
 import { ProviderAccountingError } from "../providers/provider-executor.js";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -698,7 +699,7 @@ describe("AgentStepExecutor", () => {
     });
   });
 
-  it("gives partial synthesis an explicit bounded coverage manifest without diagnostic output", async () => {
+  it("gives partial synthesis an explicit bounded coverage manifest with separately qualified diagnostic references", async () => {
     const base = makeDependencyGraph();
     const successful: TaskStep = {
       ...base.steps[0]!,
@@ -795,7 +796,8 @@ describe("AgentStepExecutor", () => {
     expect(context).toContain(`\"stepId\":\"${failed.id}\",\"title\":\"${failed.title}\",\"researchScope\":\"missing-scope\",\"status\":\"failed\",\"resultAvailable\":false`);
     expect(context).toContain("missing-scope");
     expect(context).toContain("accepted-partial-result");
-    expect(context).not.toContain("diagnostic-partial-result");
+    expect(context).toContain("diagnostic-partial-result");
+    expect(context).toContain("Unaccepted drafts available for inspection, not accepted evidence");
     expect(context).not.toContain("Untrusted incomplete output");
     expect(context.length).toBeLessThanOrEqual(16_000);
   });
@@ -861,7 +863,94 @@ describe("AgentStepExecutor", () => {
     expect(JSON.stringify(settled)).not.toContain("source-citations-missing");
   });
 
-  it("keeps accepted-report content checks in the delivery runtime even with an execution marker", async () => {
+  it.each(["recovered", "settled", "uncertain", "unknown", "denied", "privileged", "required-check"])("settles research experiments without erasing authority or effects: %s", async mode => {
+    const graph = makeGraph();
+    const step: TaskStep = { ...graph.steps[0]!, executor: { ...graph.steps[0]!.executor, role: "worker",
+      research: { scope: "source audit", requireLiveSources: false, requireRepositoryEvidence: true } } };
+    const failed: ToolExecutionRecord = {
+      tool: tool("terminal.run", "workspace-write", ["shell-write"]), riskClass: mode === "privileged" ? "credential-access" : "workspace-write",
+      decision: mode === "denied" ? "deny" : "allow", input: { command: "npm ci", ...(mode === "required-check" ? { verification: "required-suite" } : {}) },
+      toolCallId: "failed-setup", result: { ok: false, content: "Controlled setup failure" },
+      ...(mode === "unknown" ? {} : { settlement: { terminalStatus: "failed", dispatchState: "finished", sideEffectState: mode === "uncertain" ? "possible" : "none" } as const })
+    };
+    const executions = [failed,
+      ...(mode === "recovered" ? [{ ...failed, result: { ok: true, content: "Installed" } }] : []),
+      successfulEvidenceExecution("file.grep", "read-only-local", ["files"], { pattern: "completion" }, "src/completion.ts"),
+      successfulEvidenceExecution("file.read", "read-only-local", ["files"], { path: "src/completion.ts" }, "export const completion = true;", { path: "src/completion.ts" })
+    ];
+    const text = "src/completion.ts exports completion. Setup initially failed; only the successful source reads support these findings.";
+    const factory: ChildAgentLoopFactory = { createChild: vi.fn(async input => {
+      await sessionDb.createSession({ id: "experiment-worker", profileId: input.profileId, parentSessionId: input.parentSessionId });
+      return childRuntime(async request => {
+        const feedback = request.stepCompletion?.validate?.(text, executions);
+        if (["uncertain", "unknown", "denied", "privileged"].includes(mode)) expect(feedback).toMatchObject({ repairable: false });
+        return response({ text, toolExecutions: executions });
+      }, async () => undefined, { sessionId: "experiment-worker", trajectoryId: "experiment" });
+    }) };
+    const executor = new AgentStepExecutor({ childFactory: factory, sessionDb, taskStore: store, hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true, parentVisibleTools: tools, approvalService: new TaskApprovalService({ store }), securityPolicy: capabilityFirstDefaults });
+    const settled = await executor.execute({ task: graph.task, step, attempt: attempt(graph), signal: new AbortController().signal, heartbeat: vi.fn(), checkpoint: vi.fn() });
+    expect(settled.outcome).toBe(["recovered", "settled"].includes(mode) ? "succeeded" : "failed");
+    if (mode === "uncertain") expect(settled).toMatchObject({ failure: { uncertainSideEffects: true } });
+    if (mode === "denied") expect(settled).toMatchObject({ failure: { class: "security-deny" }, diagnosticResults: [{ content: text }] });
+    if (["uncertain", "unknown", "privileged"].includes(mode)) expect(settled).not.toHaveProperty("diagnosticResults");
+  });
+
+  it.each(["success", "tampered", "denied"])("exports accepted report bytes through governed tools without a model: %s", async mode => {
+    const { createWorkspaceTools } = await import("../tools/workspace-tools.js");
+    const { ToolRegistry } = await import("../tools/tool-registry.js");
+    const { ToolExecutor } = await import("../tools/tool-executor.js");
+    const { TrajectoryRecorder } = await import("../trajectory/trajectory-recorder.js");
+    const graph = makeDependencyGraph();
+    graph.task.workspace = { canonicalPath: tempDir, identityHash: "fixture-workspace" };
+    graph.steps[0]!.executor = { kind: "agent", role: "synthesis" };
+    graph.steps[0]!.resultPolicy = { kind: "text", required: true, maxBytes: 100_000 };
+    graph.steps[1]!.executor = { kind: "agent", role: "report-delivery", requestContract: {
+      version: 1, objective: "Save report.md", requirements: { skillReferences: [], issues: [],
+        fileOutput: { format: "markdown", path: "report.md", verification: "execution" } } } };
+    graph.steps[1]!.authorityPolicy = { ...graph.steps[1]!.authorityPolicy, allowedTools: ["task.result.read", "file.write", "file.read"], allowedToolsets: ["core", "files"], riskClassPolicy: riskPolicy({ "read-only-local": "runtime_policy", "workspace-write": "runtime_policy" }) };
+    graph.task.authorityPolicy = graph.steps[1]!.authorityPolicy;
+    graph.steps[0]!.authorityPolicy = graph.task.authorityPolicy;
+    store.createTaskGraph(graph);
+    const content = "# Verified source report\n\n" + "Evidence with العربية and 😀.\n".repeat(1000);
+    resultService.record({ taskId: graph.task.id, stepId: graph.steps[0]!.id, kind: "text", content });
+    const handle = vi.fn(async () => response());
+    const executed: string[] = [];
+    const registered = [
+      ...createWorkspaceTools({ workspaceRoot: tempDir, taskResultService: resultService, sessionId: "export-worker", canReadTaskResults: () => true }),
+      ...createTaskResultTools({ service: resultService, currentSessionId: () => "export-worker" })
+    ];
+    const factory: ChildAgentLoopFactory = { createChild: vi.fn(async input => {
+      await sessionDb.createSession({ id: "export-worker", profileId: input.profileId, parentSessionId: input.parentSessionId });
+      store.linkSession({ taskId: graph.task.id, profileId: "alpha", sessionId: "export-worker", relationship: "worker", stepId: graph.steps[1]!.id, createdAt: NOW });
+      const registry = new ToolRegistry(); for (const tool of registered) registry.register(tool);
+      const toolExecutor = new ToolExecutor({ registry, workspaceRoot: tempDir, sessionDb,
+        securityPolicy: { decide: request => mode === "denied" && request.toolName === "file.write" ? "deny" : "allow" },
+        trajectoryRecorder: new TrajectoryRecorder({ profileId: "alpha", sessionId: "export-worker", modelId: "none" }) });
+      const actual = toolExecutor.executeTool.bind(toolExecutor);
+      vi.spyOn(toolExecutor, "executeTool").mockImplementation(async request => {
+        executed.push(request.tool);
+        if (mode === "tampered" && request.tool === "file.read") writeFileSync(join(tempDir, "report.md"), "changed after write");
+        return actual(request);
+      });
+      const child = childRuntime(handle, async () => undefined, { sessionId: "export-worker", trajectoryId: "export" }, { tools: ["task.result.read", "file.write", "file.read"], toolsets: ["core", "files"] });
+      child.builtSession = { ...child.builtSession, toolExecutor };
+      return child;
+    }) };
+    const executor = new AgentStepExecutor({ childFactory: factory, sessionDb, taskStore: store, hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true, parentVisibleTools: () => registered, approvalService: new TaskApprovalService({ store }), securityPolicy: capabilityFirstDefaults });
+    const step = graph.steps[1]!;
+    const settled = await executor.execute({ task: graph.task, step, attempt: attempt(graph, step), signal: new AbortController().signal, heartbeat: vi.fn(), checkpoint: vi.fn() });
+    expect(handle).not.toHaveBeenCalled();
+    expect(executed.filter(tool => tool === "task.result.read").length).toBeGreaterThan(1);
+    if (mode === "success") {
+      expect(settled.outcome).toBe("succeeded");
+      expect(readFileSync(join(tempDir, "report.md"), "utf8")).toBe(content);
+    } else expect(settled).toMatchObject({ outcome: "failed", failure: { class: mode === "denied" ? "security-deny" : "delivery-content-unverified" } });
+    if (mode === "denied") expect(executed).not.toContain("file.read");
+  });
+
+  it("refuses deterministic delivery without an accepted source and never calls a model", async () => {
     const graph = makeGraph();
     graph.steps[0]!.executor = { ...graph.steps[0]!.executor, role: "report-delivery", requestContract: {
       version: 1, objective: "Save report.md", requirements: { skillReferences: [], issues: [],
@@ -876,10 +965,8 @@ describe("AgentStepExecutor", () => {
     const executor = new AgentStepExecutor({ childFactory, sessionDb, taskStore: store, hostWorkspace: graph.task.workspace,
       isWorkspaceTrusted: () => true, parentVisibleTools: tools, approvalService: new TaskApprovalService({ store }), securityPolicy: capabilityFirstDefaults });
     const settled = await executor.execute({ task: graph.task, step: graph.steps[0]!, attempt: attempt(graph), signal: new AbortController().signal, heartbeat: vi.fn(), checkpoint: vi.fn() });
-    expect(handled?.stepCompletion?.requirements).toMatchObject({ sourceTaskId: graph.task.id, fileOutput: { verification: "execution" } });
-    const { requiresAnyFileContentVerification } = await import("../contracts/request-requirements.js");
-    expect(requiresAnyFileContentVerification(handled?.stepCompletion?.requirements)).toBe(true);
-    expect(settled).toMatchObject({ outcome: "failed", failure: { class: "evidence-contract-unsatisfied" } });
+    expect(handled).toBeUndefined();
+    expect(settled).toMatchObject({ outcome: "failed", failure: { class: "delivery-source-or-target-missing" } });
   });
 
   it.each(["corrected", "alternative", "worker-contract-only", "missing-evidence", "uncited-evidence", "denied", "uncertain-effect", "mutation", "unavailable", "non-research", "stopped"])("preserves local research with read limitations: %s", async mode => {
@@ -926,7 +1013,7 @@ describe("AgentStepExecutor", () => {
     if (result.outcome === "succeeded") {
       const report = result.results?.[0]?.content;
       expect(report).toContain(text);
-      expect(report).toContain("Research read limitations: 3 local read attempt(s) failed (file.grep, terminal.inspect)");
+      expect(report).toContain("Exploration limitations: 3 settled exploratory attempt(s) failed (file.grep, terminal.inspect)");
       expect(report).not.toContain("--format=%H");
     }
     if (mode === "denied") expect(result).toMatchObject({ failure: { class: "security-deny" } });

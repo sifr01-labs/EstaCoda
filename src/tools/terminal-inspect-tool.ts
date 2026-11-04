@@ -374,7 +374,14 @@ function createInspectionValidation(files: WorkspaceFiles) {
       return errorResult("argv entries must be strings") as ToolResult & { ok: false };
     }
 
-    const argv = rawArgv.map((arg) => arg.trim());
+    let argv = rawArgv.map((arg) => arg.trim());
+    // A redundant -C to this already-bound workspace is safe; never use it to
+    // switch the inspection tool into another checkout or bypass path checks.
+    if (argv[0] === "git" && argv[1] === "-C") {
+      const target = await resolveWorkspacePath(root, argv[2], { allowDirectory: true });
+      if (!target.ok || target.path !== root) return errorResult("git -C must name the bound workspace root") as ToolResult & { ok: false };
+      argv = ["git", ...argv.slice(3)];
+    }
     const structuralError = validateStructuralArgv(argv);
     if (structuralError !== undefined) {
       return errorResult(structuralError) as ToolResult & { ok: false };
@@ -394,6 +401,10 @@ function createInspectionValidation(files: WorkspaceFiles) {
   }
 
   function validateStructuralArgv(argv: string[]): string | undefined {
+    // git grep's first non-option operand is literal data in this argv-only API.
+    // All later path operands retain the existing structural and path validation.
+    const patternIndex = argv[0] === "git" && argv[1] === "grep"
+      ? argv.findIndex((arg, index) => index > 1 && !arg.startsWith("-")) : -1;
     for (const [index, arg] of argv.entries()) {
       if (arg.length === 0) {
         return "argv entries must be non-empty strings";
@@ -404,7 +415,7 @@ function createInspectionValidation(files: WorkspaceFiles) {
       if (CONTROL_CHAR_PATTERN.test(arg)) {
         return "argv entries must not contain control characters";
       }
-      if (SHELL_SYNTAX_PATTERN.test(arg) || COMMAND_SUBSTITUTION_PATTERN.test(arg)) {
+      if (index !== patternIndex && (SHELL_SYNTAX_PATTERN.test(arg) || COMMAND_SUBSTITUTION_PATTERN.test(arg))) {
         return "terminal.inspect does not allow shell syntax";
       }
       if (ENV_ASSIGNMENT_PATTERN.test(arg)) {
@@ -540,6 +551,9 @@ function createInspectionValidation(files: WorkspaceFiles) {
         ]));
       case "log":
         return validateGitLogArgs(root, subArgs);
+      case "rev-parse":
+        return ["HEAD", "--verify HEAD", "--short HEAD", "--show-toplevel"].includes(subArgs.join(" "))
+          ? undefined : "git rev-parse allows only HEAD, --verify HEAD, --short HEAD, or --show-toplevel";
       case "branch":
         return validateGitSimpleOptions("git branch", subArgs, new Set(["--show-current", "--list", "-a", "-r", "-v", "--color=never", "--no-color"]));
       case "remote":
@@ -591,8 +605,13 @@ function createInspectionValidation(files: WorkspaceFiles) {
       if (["--oneline", "--decorate", "--stat", "--name-only", "--color=never", "--no-color"].includes(arg)) {
         continue;
       }
-      if (/^--max-count=\d+$/u.test(arg) || /^-n\d+$/u.test(arg)) {
+      if (/^--max-count=\d+$/u.test(arg) || /^-n?\d+$/u.test(arg)) {
         continue;
+      }
+      if (/^--(?:format|pretty=format):?=/u.test(arg)) {
+        const format = arg.slice(arg.indexOf("=") + 1);
+        if (format.length <= 200 && /^(?:%(?:H|h|s|cI|aI|ci|ai|n)|[ ,:._/-])*$/u.test(format)) continue;
+        return "git log format contains unsupported placeholders";
       }
       if (arg === "-n") {
         const count = args[++index];
@@ -651,7 +670,7 @@ function createInspectionValidation(files: WorkspaceFiles) {
         afterDoubleDash = true;
         continue;
       }
-      if (!patternSeen && !afterDoubleDash && ["-n", "-i", "-F", "--line-number", "--ignore-case", "--fixed-strings", "--color=never", "--no-color"].includes(arg)) {
+      if (!patternSeen && !afterDoubleDash && ["-n", "-i", "-F", "-E", "--line-number", "--ignore-case", "--fixed-strings", "--extended-regexp", "--color=never", "--no-color"].includes(arg)) {
         continue;
       }
       if (!patternSeen) {

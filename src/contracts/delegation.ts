@@ -112,6 +112,8 @@ export type DelegationAccessAudit = {
 /** One fixed terminal Step that combines the durable results of every delegated worker. */
 export type DelegateSynthesis = {
   objective: string;
+  /** Explicit workspace output commitment, still subject to write authorization. */
+  outputPath?: string;
   modelOverride?: DelegateModelOverride;
 };
 

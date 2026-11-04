@@ -62,7 +62,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
         "Returns a Task handle immediately; use Task status and result surfaces to follow completion.",
         `Supports one task or up to ${delegationConfig.maxBatchTasks} batch tasks.`,
         "Batches add one fixed terminal synthesis Step by default; pass synthesis: false only for inspection-only work.",
-        "A synthesis object can provide a custom final-answer objective and model.",
+        "A synthesis object can provide a custom final-answer objective and model. To promise a saved report, set synthesis.outputPath to a relative .md or .txt workspace path; prose alone does not schedule delivery.",
         "A non-terminal root Task with a primary Result Step owns the requested answer: this provider turn ends after creation and the durable result is delivered when the Task settles.",
         "Include required verification in the worker objectives before handing off; synthesis must receive actual test receipts and limitations. If execution is unavailable, finish parent-owned checks before delegation or report the unmet requirement; do not silently omit it.",
         "Research items should use distinct non-overlapping scopes; live and repository evidence requirements are verified from observed tool results, not model claims.",
@@ -126,6 +126,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
                 additionalProperties: false,
                 properties: {
                   objective: { type: "string", minLength: 1 },
+                  outputPath: { type: "string", description: "Explicit relative workspace report destination (.md or .txt). Creates a governed exact-copy delivery step; does not grant write permission." },
                   modelOverride: modelOverrideSchema()
                 },
                 required: ["objective"]
@@ -401,7 +402,7 @@ function normalizeSynthesis(
     return { ok: false, code: "invalid-synthesis", message: "delegate_task synthesis must be an object or false." };
   }
   const record = value as Record<string, unknown>;
-  const unknownKeys = Object.keys(record).filter((key) => key !== "objective" && key !== "modelOverride");
+  const unknownKeys = Object.keys(record).filter((key) => key !== "objective" && key !== "modelOverride" && key !== "outputPath");
   if (unknownKeys.length > 0) {
     return {
       ok: false,
@@ -412,12 +413,14 @@ function normalizeSynthesis(
   if (typeof record.objective !== "string" || record.objective.trim().length === 0) {
     return { ok: false, code: "invalid-synthesis", message: "delegate_task synthesis.objective must be non-empty." };
   }
+  if (record.outputPath !== undefined && typeof record.outputPath !== "string") return { ok: false, code: "invalid-synthesis", message: "synthesis.outputPath must be a relative workspace report path." };
   const modelOverride = normalizeModelOverride(record.modelOverride, "delegate_task synthesis.modelOverride");
   if (!modelOverride.ok) return modelOverride;
   return {
     ok: true,
     value: {
       objective: record.objective.trim(),
+      ...(record.outputPath === undefined ? {} : { outputPath: record.outputPath as string }),
       ...(modelOverride.value === undefined ? {} : { modelOverride: modelOverride.value })
     }
   };

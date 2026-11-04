@@ -21,6 +21,9 @@ export function providerVisibleToolResultMaxChars(toolName: string, defaultMaxCh
   // A recovered page must arrive intact: clipping it while advancing nextOffset
   // would silently skip evidence again. The tool enforces its own bounded JSON.
   if (toolName === "session_search") return 20_000;
+  // Includes the bounded page and its result/offset envelope. Never clip a page
+  // while advertising an offset beyond text delivered to the model.
+  if (toolName === "task.result.read") return 32_000;
   return ["file.read", "terminal.run", "terminal.inspect", "process.logs", "execute_code"].includes(toolName)
     ? 16_000 : defaultMaxChars;
 }
@@ -74,7 +77,9 @@ export function packetizeToolResult(input: {
     excerpt,
     ...(retainedReference ? { recoveryHint: retainedReference } : truncated ? { recoveryHint: input.tool === "file.read"
       ? "Read smaller ranges with file.read lineStart/lineEnd; do not repeat the whole-file read or treat this excerpt as full content."
-      : "Inspect saved output files with bounded file.read ranges, or use process.logs tailChars for managed processes. Do not rerun a mutating command just to recover output." } : {}),
+      : input.tool === "task.result.read"
+        ? "Read this result again with task.result.read using a smaller max_chars and the same offset; do not advance past omitted text."
+        : "Inspect saved output files with bounded file.read ranges, or use process.logs tailChars for managed processes. Do not rerun a mutating command just to recover output." } : {}),
     metadataSummary: summarizeMetadata(input.result?.metadata)
   };
 }
