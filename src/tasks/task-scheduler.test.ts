@@ -974,6 +974,31 @@ describe("TaskScheduler", () => {
     }
   });
 
+  it.each([
+    ["step tokens", 1, 50_001, {}, "step-token"],
+    ["step calls", 6, 100, {}, "step-provider-call"],
+    ["task tokens", 1, 100_001, { maxProviderCalls: 20, maxTotalTokens: 100_000 }, "task-token"],
+    ["task calls", 11, 100, {}, "task-provider-call"]
+  ] as const)("preserves validated output after %s exhaustion without accepting coverage", async (_label, calls, tokens, limits, reason) => {
+    store.createTaskGraph(makeGraph([makeStep("limited", 0)], limits));
+    const executor = new FakeTaskStepExecutor(() => ({
+      outcome: "succeeded", usage: usage(calls, tokens, 0),
+      results: [{ kind: "text", content: "Observed source findings; not accepted coverage." }]
+    }));
+    const scheduler = makeScheduler(executor);
+    expect(await scheduler.runOnce()).toMatchObject({ failed: 1, completed: 0 });
+    const attempt = store.listAttempts("task-alpha")[0]!;
+    expect(attempt.failure?.message).toContain(reason);
+    expect(attempt.usage.totalTokens).toBe(tokens);
+    expect(store.getStep("step-limited")?.status).toBe("failed");
+    const [draft] = store.listResults("task-alpha");
+    expect(draft).toMatchObject({ disposition: "diagnostic", status: "available" });
+    await expect(resultService.readPage({ taskId: "task-alpha", resultId: draft!.id, sessionId: "creator-alpha" }))
+      .resolves.toMatchObject({ content: "Observed source findings; not accepted coverage." });
+    await scheduler.runOnce();
+    expect(store.listResults("task-alpha")).toHaveLength(1);
+  });
+
   it("actively aborts an Attempt at its earliest wall-clock deadline and preserves late output as diagnostic", async () => {
     vi.useFakeTimers();
     try {

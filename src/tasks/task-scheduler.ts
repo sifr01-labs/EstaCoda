@@ -1453,7 +1453,10 @@ export class TaskScheduler {
         acceptanceFailure,
         usage,
         settlement.usageEntries,
-        executionLimitReason?.includes("wall-clock") === true ? results : undefined
+        // A budget rejection changes acceptance, not the existence of validated
+        // output. Publish through the same fenced diagnostic path for every
+        // execution limit (including ancestor limits); never satisfy coverage.
+        executionLimitReason !== undefined ? results : undefined
       );
       return "failed";
     }
