@@ -61,6 +61,17 @@ describe("session capability recovery requests", () => {
     ]);
   });
 
+  it("returns an executable exposure request for an available omitted tool", async () => {
+    const { recovery, catalog } = harness();
+    const result = recovery.discover({ ids: ["tool:test.0"] }, scope);
+    const next = (result.metadata?.matches as Array<{ next_action: { input: unknown } }>)[0]!.next_action;
+    const request = recovery.request(next.input, scope);
+    expect(request.ok).toBe(true);
+    const active = catalog.entries.filter(entry => entry.tool.name.startsWith("capability.")).map(entry => entry.schema);
+    const applied = await recovery.applyRequests(recovery.takeRequests([execution(request)]), active);
+    expect(applied.applied).toEqual(["tool:test.0"]);
+  });
+
   it("accepts only authentic successful receipts, not copied/spoofed metadata", () => {
     const { recovery } = harness();
     const result = recovery.request({ ids: ["tool:test.0"], reason: "needed" }, scope);

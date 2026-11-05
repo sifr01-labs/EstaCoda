@@ -24,6 +24,7 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 10_000;
 
 export type TaskExecutorHostRuntime = {
   taskAgentExecutor?: AgentStepExecutor;
+  hasPendingBackgroundWork?(): boolean;
   dispose(): Promise<void>;
 };
 
@@ -158,7 +159,7 @@ export class SupervisorTaskBackgroundHost {
 
   hasPendingWork(): boolean {
     return this.#host.hasPendingWork() || [...this.#workspaces.values()].some(
-      (state) => state.creation !== undefined || state.cleanupPending === true
+      (state) => state.creation !== undefined || state.cleanupPending === true || state.runtime?.hasPendingBackgroundWork?.() === true
     );
   }
 
@@ -389,7 +390,7 @@ export class SupervisorTaskBackgroundHost {
   async #disposeUnusedWorkspaceRuntimes(): Promise<void> {
     const used = new Set([...this.#owned.values()].map((lease) => lease.workspaceIdentityHash));
     for (const [workspaceId, state] of [...this.#workspaces]) {
-      if (used.has(workspaceId) || state.creation !== undefined) continue;
+      if (used.has(workspaceId) || state.creation !== undefined || state.runtime?.hasPendingBackgroundWork?.()) continue;
       if (await this.#disposeWorkspaceRuntime(state, "workspace-unused")) {
         this.#workspaces.delete(workspaceId);
       }

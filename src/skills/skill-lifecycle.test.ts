@@ -240,7 +240,7 @@ it("cancels background model review for foreground work and preserves a retryabl
   const h = await harness(); const db = new InMemorySessionDB();
   for (const id of ["cancel-a", "cancel-b"]) await db.createSession({ id, profileId: "default" });
   let started!: () => void; const entered = new Promise<void>(resolve => { started = resolve; });
-  const drafter = vi.fn(async ({ signal }) => { started(); await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true })); return patch; });
+  const drafter = vi.fn(async ({ signal }): Promise<typeof patch | undefined> => { started(); await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true })); return patch; });
   const manager = new SkillLearningManager({ autonomy: "proactive", registry: h.registry, localSkillsRoot: h.root,
     storePath: join(h.root, ".learning.json"), sessionDb: db, skillEvolutionStore: h.store, drafter, proposalService: h.service });
   for (const sessionId of ["cancel-a", "cancel-b"]) await manager.observeTurn({ profileId: "default", sessionId,
@@ -249,9 +249,10 @@ it("cancels background model review for foreground work and preserves a retryabl
   await entered; await manager.cancelBackgroundReview();
   expect((await manager.inspect())[0]).toMatchObject({ draftStatus: "pending" });
   expect((await manager.inspect())[0]?.draftAttemptedAt).toBeDefined();
+  drafter.mockResolvedValueOnce(undefined);
   manager.startBackgroundReview({ profileId: "default", sessionId: "cancel-b", agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive"), validateAuthority: async () => {} });
   await manager.waitForBackgroundReview();
-  expect(drafter).toHaveBeenCalledTimes(1);
+  expect(drafter).toHaveBeenCalledTimes(2);
   expect(await h.service.listProposals()).toHaveLength(0);
   expect(await readFile(h.skillPath, "utf8")).toBe(content);
 });
@@ -449,4 +450,61 @@ it("retries technical drafting failures once with a distinct attempt, but never 
     expect(drafter).toHaveBeenCalledTimes(2);
   } finally { clock.mockRestore(); }
   expect(await h.service.listProposals()).toHaveLength(0);
+});
+
+it("persists settlement review before clearing handoff and resumes only in the owning workspace", async () => {
+  const h = await harness(), db = new InMemorySessionDB();
+  await db.createSession({ id: "parent", profileId: "default" });
+  await db.appendMessage({ sessionId: "parent", role: "user", content: "Inspect verification results before reporting success." });
+  const drafter = vi.fn().mockResolvedValue(patch), policy = deriveAgentEvolutionPolicy("proactive", { skillWriteApproval: true });
+  const options = { autonomy: "proactive" as const, registry: h.registry, localSkillsRoot: h.root,
+    storePath: join(h.root, ".learning.json"), sessionDb: db, skillEvolutionStore: h.store, drafter, proposalService: h.service };
+  const manager = new SkillLearningManager(options);
+  await manager.observeTurn({ profileId: "default", sessionId: "parent", userText: "Review checks", selectedSkill: h.skill,
+    delegatedTaskIds: ["task"], agentEvolutionPolicy: policy, toolExecutions: [] });
+  const store = { profileId: "default", getTask: () => ({ id: "task", status: "partial", originSessionId: "parent", workspace: { identityHash: "workspace" } }),
+    listAttempts: () => [{ failure: { class: "execution-limit-exceeded" } }], listResults: () => [] } as unknown as TaskStore;
+  await manager.reconcileSettledTasks({ store, profileId: "default", workspaceIdentityHash: "workspace", agentEvolutionPolicy: policy, validateAuthority: async () => {} });
+  const disk = JSON.parse(await readFile(options.storePath, "utf8"));
+  expect(disk.deferredTurns).toEqual([]);
+  expect(disk.pendingReviews).toEqual([expect.objectContaining({ sessionId: "parent", workspaceIdentityHash: "workspace" })]);
+  // Crash here: no in-memory startBackgroundReview call was ever made.
+  const restarted = new SkillLearningManager(options);
+  const request = { profileId: "default", workspaceIdentityHash: "workspace", agentEvolutionPolicy: policy, validateAuthority: async () => {} };
+  await restarted.resumeBackgroundReviews({ ...request, workspaceIdentityHash: "other" });
+  await restarted.waitForBackgroundReview(); expect(drafter).not.toHaveBeenCalled();
+  await restarted.resumeBackgroundReviews({ ...request, validateAuthority: async () => { throw Error("revoked"); } });
+  await restarted.waitForBackgroundReview(); expect(drafter).not.toHaveBeenCalled();
+  await restarted.resumeBackgroundReviews(request); await restarted.waitForBackgroundReview();
+  expect(drafter).toHaveBeenCalledTimes(1); expect(await h.service.listProposals()).toHaveLength(1);
+  await new SkillLearningManager(options).resumeBackgroundReviews(request);
+  expect(JSON.parse(await readFile(options.storePath, "utf8")).pendingReviews).toEqual([]);
+});
+
+it("reclaims an expired interrupted claim without duplicate proposals or stale-owner writes", async () => {
+  const h = await harness(), db = new InMemorySessionDB();
+  await db.createSession({ id: "parent", profileId: "default" });
+  await db.appendMessage({ sessionId: "parent", role: "user", content: "Correction: inspect verification before claiming success." });
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const stuck = new Promise<void>(resolve => { release = resolve; });
+  const drafter = vi.fn().mockImplementationOnce(async () => { entered(); await stuck; return patch; }).mockResolvedValue(patch);
+  const policy = deriveAgentEvolutionPolicy("proactive", { skillWriteApproval: true });
+  const options = { autonomy: "proactive" as const, registry: h.registry, localSkillsRoot: h.root,
+    storePath: join(h.root, ".learning.json"), sessionDb: db, skillEvolutionStore: h.store, drafter, proposalService: h.service };
+  const first = new SkillLearningManager(options), second = new SkillLearningManager(options);
+  await first.observeTurn({ profileId: "default", sessionId: "parent", userText: "Review checks", selectedSkill: h.skill,
+    outcomeStatus: "partial", agentEvolutionPolicy: policy, toolExecutions: [] });
+  const request = { profileId: "default", agentEvolutionPolicy: policy, validateAuthority: async () => {} };
+  first.startBackgroundReview({ ...request, sessionId: "parent" }); await started;
+  await second.resumeBackgroundReviews(request); await second.waitForBackgroundReview();
+  expect(drafter).toHaveBeenCalledTimes(1);
+  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 601_000);
+  try {
+    await second.resumeBackgroundReviews(request); await second.waitForBackgroundReview();
+    expect(drafter).toHaveBeenCalledTimes(2);
+    release(); await first.waitForBackgroundReview();
+    expect(await h.service.listProposals()).toHaveLength(1);
+    expect((await second.inspect())[0]).toMatchObject({ draftStatus: "proposed", draftAttempts: 2 });
+  } finally { release(); clock.mockRestore(); }
 });

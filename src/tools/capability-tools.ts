@@ -127,6 +127,8 @@ export class SessionCapabilityRecovery {
       ...(kind === "skill" ? [] : (this.#catalog?.inventory ?? []).map(tool => ({
         id: `tool:${tool.name}`, kind: "tool", name: tool.name, description: tool.description.slice(0, 300), toolsets: tool.toolsets,
         ...(tool.availability !== "available" ? { setup_note: tool.availabilityReason ?? "Check capability setup and current availability before requesting exposure." } : {}),
+        ...(tool.availability === "available" && tool.schemaEligible && !this.#active.has(tool.name)
+          ? { next_action: { tool: "capability.request", input: { ids: [`tool:${tool.name}`], reason: "Needed for the current task" }, note: "Exposure only; invoke on a later iteration under existing authorization." } } : {}),
         state: tool.availability !== "available" ? tool.availability : !tool.schemaEligible ? "provider_schema_restricted" : this.#active.has(tool.name) ? "exposed" : "not_selected"
       }))),
       ...(kind === "tool" ? [] : this.#skills.list().map(skill => ({

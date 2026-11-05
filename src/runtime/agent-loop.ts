@@ -1,3 +1,4 @@
+import { recoverableDraft } from "./recoverable-draft.js";
 import { safePath } from "./command-file-observation.js";
 import {formatRunLimitStop} from './run-limit-receipt.js';
 import { completionAdmissionFeedback } from "./completion-admission.js";
@@ -1524,6 +1525,17 @@ export class AgentLoop {
       const checks = commandCompletionChecks(toolExecutions, this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id));
       if (fileEvidence.satisfied && researchEvidence.satisfied && checks.unresolved) {
         response.text = `Required validation remains incomplete: ${checks.unresolvedRequirements.slice(0, 8).join(", ")}. No successful current result was recorded for these checks.`;
+        if (response.providerExecution !== undefined) response.providerExecution = suppressProviderGeneratedText(response.providerExecution);
+      }
+    }
+    // Delivery is independent of acceptance. Keep the runtime verdict first and
+    // expose eligible rejected text only as an explicitly unaccepted draft.
+    if (this.#taskExecution === undefined && providerLoop.completionValidationFailure && providerLoop.completionCandidate) {
+      const draft = recoverableDraft(providerLoop.completionCandidate, toolExecutions);
+      if (draft !== undefined) {
+        response.text += this.#ui?.language === "ar"
+          ? `\n\nمسودة جزئية غير معتمدة — لم يجتز هذا النص التحقق من الاكتمال. الادعاءات أدناه ليست نتائج مؤكدة من النظام.\n\n${draft}`
+          : `\n\nPartial draft — not accepted\nThis draft did not pass completion validation. Claims below are not runtime-verified results. The task remains incomplete.\n\n${draft}`;
         if (response.providerExecution !== undefined) response.providerExecution = suppressProviderGeneratedText(response.providerExecution);
       }
     }

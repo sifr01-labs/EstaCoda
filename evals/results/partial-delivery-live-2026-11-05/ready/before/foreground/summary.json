@@ -1,0 +1,31 @@
+{
+  "arm": "before",
+  "test": "foreground",
+  "foregroundOutcome": "partially_completed",
+  "elapsedMs": 235930,
+  "providerCalls": 19,
+  "inputTokens": 310285,
+  "outputTokens": 6415,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [],
+  "reports": [],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "pendingReviews": 0,
+    "drafts": [
+      {
+        "proposalCreated": false
+      }
+    ],
+    "observations": [
+      {
+        "sessionId": "92066934-5df2-4a58-8dad-5110ccc5cf2f",
+        "outcome": "partial",
+        "findings": [],
+        "timestamp": "2026-11-05T23:35:19.451Z"
+      }
+    ]
+  }
+}

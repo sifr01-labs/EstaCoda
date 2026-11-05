@@ -376,6 +376,7 @@ export type Runtime = {
   isWorkspaceTrusted(): Promise<boolean>;
   revokeWorkspaceTrust(): Promise<boolean>;
   enqueueSessionFinalization?(reason: SessionFinalizationReason): SessionFinalizationJob | undefined;
+  hasPendingBackgroundWork?(): boolean;
   dispose(): Promise<void>;
   sessionDb: SessionDB;
   sessionId: string;
@@ -827,11 +828,13 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     if (disposed || !taskStore) return;
     const sessions = await skillLearningManager.reconcileSettledTasks({ store: taskStore, profileId, workspaceIdentityHash: taskWorkspace?.identityHash,
       agentEvolutionPolicy, validateAuthority: validateLiveAuthority });
-    for (const sessionId of sessions) skillLearningManager.startBackgroundReview({ profileId, sessionId,
+    for (const sessionId of sessions) skillLearningManager.startBackgroundReview({ profileId, sessionId, workspaceIdentityHash: taskWorkspace?.identityHash,
       agentEvolutionPolicy, validateAuthority: validateLiveAuthority });
   };
   // Persisted pending handoffs survive process interruption between settlement and observation.
   await reconcileTaskLearning().catch(() => undefined);
+  await skillLearningManager.resumeBackgroundReviews({ profileId, workspaceIdentityHash: taskWorkspace?.identityHash,
+    agentEvolutionPolicy, validateAuthority: validateLiveAuthority }).catch(() => undefined);
   const memoryPromptContextBuilder = new MemoryPromptContextBuilder({
     store: memoryStore,
     promotionStore: memoryPromotionStore
@@ -1532,7 +1535,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
         });
         await reconcileTaskLearning().catch(() => undefined);
         if (!disposed && !input.signal?.aborted) skillLearningManager.startBackgroundReview({
-          profileId, sessionId: sessionRuntimeContext.currentSessionId(), agentEvolutionPolicy,
+          profileId, sessionId: sessionRuntimeContext.currentSessionId(), workspaceIdentityHash: taskWorkspace?.identityHash, agentEvolutionPolicy,
           validateAuthority: validateLiveAuthority,
           onSkillUpdated: async (skillName, proposalId) => {
             const reviewSessionId = current.id;
@@ -1684,6 +1687,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
         reason,
       });
     },
+    hasPendingBackgroundWork: () => skillLearningManager.hasActiveReview(),
     async dispose() {
       return disposal ??= (async () => {
         disposed = true;

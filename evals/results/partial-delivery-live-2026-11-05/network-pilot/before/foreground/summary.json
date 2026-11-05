@@ -1,0 +1,20 @@
+{
+  "arm": "before",
+  "test": "foreground",
+  "foregroundOutcome": "failed",
+  "elapsedMs": 3324,
+  "providerCalls": 2,
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "usageComplete": false,
+  "pricingComplete": false,
+  "tasks": [],
+  "reports": [],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "pendingReviews": 0,
+    "drafts": [],
+    "observations": []
+  }
+}

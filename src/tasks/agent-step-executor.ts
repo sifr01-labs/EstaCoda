@@ -1,3 +1,4 @@
+import { recoverableDraft } from "../runtime/recoverable-draft.js";
 import { commandCompletionFeedback } from "../runtime/command-completion-checks.js";
 import { requestedFileOutputs } from "../contracts/request-requirements.js";
 import type { CompletionFeedback } from "../runtime/provider-turn-loop.js";
@@ -959,17 +960,8 @@ function safeDiagnosticOutput(
   text: string,
   toolExecutions: Awaited<ReturnType<ChildAgentLoopRuntime["handle"]>>["toolExecutions"]
 ): { diagnosticResults?: readonly TaskExecutorResultContent[] } {
-  if (text.trim().length === 0) return {};
-  if (toolExecutions.some(execution => execution.decision !== "allow") && !toolExecutions.some(execution => execution.decision === "allow" && execution.result?.ok === true)) return {};
-  // Preserve unaccepted drafts from settled local work, including pre-dispatch
-  // denials. Never republish actual privileged output or uncertain mutations.
-  if (toolExecutions.some(execution =>
-    execution.settlement?.sideEffectState === "possible" ||
-    execution.decision === "allow" && !["read-only-local", "read-only-network"].includes(execution.riskClass) &&
-      !(execution.riskClass === "workspace-write" && execution.settlement !== undefined &&
-        ["none", "confirmed"].includes(execution.settlement.sideEffectState))
-  )) return {};
-  const sanitized = inspectPlaintextCredentials(text).redactedText;
+  const sanitized = recoverableDraft(text, toolExecutions);
+  if (sanitized === undefined) return {};
   return {
     diagnosticResults: [{
       kind: "text",

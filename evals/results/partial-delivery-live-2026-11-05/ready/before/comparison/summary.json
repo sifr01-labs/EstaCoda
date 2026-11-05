@@ -1,0 +1,201 @@
+{
+  "arm": "before",
+  "test": "comparison",
+  "foregroundOutcome": "partially_completed",
+  "elapsedMs": 526829,
+  "providerCalls": 95,
+  "inputTokens": 1984443,
+  "outputTokens": 23331,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "partial",
+      "settlementDurationMs": 451867,
+      "steps": [
+        {
+          "id": "step_b5e3b7c3-6207-4d41-8dd4-817de3d39513",
+          "title": "Delegated work 1",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 28,
+              "totalTokens": 595499
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 16950,
+              "sha256": "sha256:58207b2603e43951eca1878db7bcd7a29a6ee3a18788c0ebfbfab8d8df4d9c08"
+            }
+          ]
+        },
+        {
+          "id": "step_b1afc380-f576-4adf-90c5-d954ae285405",
+          "title": "Delegated work 2",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 24,
+              "totalTokens": 579684
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 13475,
+              "sha256": "sha256:f768ab06c29bccf2a78bb8404a25d9a23ed1e3c0832936ab0af67d8a2e46b758"
+            }
+          ]
+        },
+        {
+          "id": "step_7e95aae0-fa4b-4d06-8bee-b735fb58d422",
+          "title": "Delegated work 3",
+          "role": "worker",
+          "status": "failed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "failed",
+              "failure": {
+                "class": "evidence-contract-unsatisfied",
+                "message": "Execution stopped (normal). Research evidence needs correction: repository-evidence. Cite evidence observed with the assigned tools; obtain missing evidence or explicitly report the unresolved gap. Inspect the preserved draft.",
+                "retryable": false,
+                "uncertainSideEffects": false
+              },
+              "providerCalls": 24,
+              "totalTokens": 580476
+            }
+          ],
+          "results": [
+            {
+              "disposition": "diagnostic",
+              "bytes": 17247,
+              "sha256": "sha256:b7bbf9b4d7f45bd0e0bf52a7429ce3103ae381ff2661beaad39906753ee89914"
+            }
+          ]
+        },
+        {
+          "id": "step_c6c3f781-1d6c-405b-b337-1dae2842a60e",
+          "title": "Synthesize delegated results",
+          "role": "synthesis",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 3,
+              "totalTokens": 38079
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 29901,
+              "sha256": "sha256:6831295af61481057f8e43b9f0d67a7bc2b218fbfb339a314b294cc642d59e4c"
+            }
+          ]
+        },
+        {
+          "id": "step_e7169b83-b2a2-4d51-880d-f05da6055126",
+          "title": "Save and verify research report",
+          "role": "report-delivery",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 0,
+              "totalTokens": 0
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 74,
+              "sha256": "sha256:66d7b6de1467f2571902793df290f9b757dbc5aa68333e5b33a8654db420176c"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "reports": [
+    {
+      "path": "reports/superagent-vs-estacoda.md",
+      "bytes": 29901,
+      "sha256": "6831295af61481057f8e43b9f0d67a7bc2b218fbfb339a314b294cc642d59e4c",
+      "matchesAcceptedResult": true
+    }
+  ],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "pendingReviews": 0,
+    "drafts": [
+      {
+        "status": "abstained",
+        "attempts": 1,
+        "proposalCreated": false
+      }
+    ],
+    "observations": [
+      {
+        "sessionId": "child_3cdeb441-cba1-458c-947f-26205b654638",
+        "outcome": "succeeded",
+        "timestamp": "2026-11-05T23:36:17.052Z"
+      },
+      {
+        "sessionId": "024c3e0a-3abd-4305-a2af-d4e47a870975",
+        "outcome": "partial",
+        "settledTasks": {
+          "id": "5a22fb463f6981113cb13c6939e84de2a1ac8ba85f9ea71d47c9e8e4e9600a94",
+          "taskIds": [
+            "task_7b9c922b-9b22-4da6-a487-cbc54a1eb7a5"
+          ],
+          "failures": [
+            "evidence-contract-unsatisfied"
+          ],
+          "acceptedResults": 4,
+          "diagnosticResults": 1,
+          "results": [
+            {
+              "taskId": "task_7b9c922b-9b22-4da6-a487-cbc54a1eb7a5",
+              "resultId": "ec6aa955-75d7-4dac-8de9-3a44789f16ac",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_7b9c922b-9b22-4da6-a487-cbc54a1eb7a5",
+              "resultId": "8320d75c-c19f-4c26-9e67-f6f2d8b35a2e",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_7b9c922b-9b22-4da6-a487-cbc54a1eb7a5",
+              "resultId": "c80ba076-2f87-4375-9601-61c368c8c5af",
+              "disposition": "diagnostic"
+            },
+            {
+              "taskId": "task_7b9c922b-9b22-4da6-a487-cbc54a1eb7a5",
+              "resultId": "e3331b17-dfd7-4241-806f-7a4fe107dcf5",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_7b9c922b-9b22-4da6-a487-cbc54a1eb7a5",
+              "resultId": "a93438dd-f267-4843-bc69-bdd075ee4587",
+              "disposition": "accepted"
+            }
+          ]
+        },
+        "findings": [],
+        "timestamp": "2026-11-05T23:41:14.287Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,194 @@
+[
+  {
+    "arm": "before",
+    "case": "foreground",
+    "toolCallId": "tool-call-deb920bc9fb3794bc97d3db4",
+    "input": {
+      "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/runtime/command-completion-checks.test.ts src/utils/task-result-summary.test.ts",
+      "verificationInputs": [
+        "."
+      ],
+      "verification": "requested-unit-tests",
+      "timeoutMs": null
+    },
+    "result": {
+      "ok": true,
+      "content": "started pid 42094\n\n RUN  v4.1.6 <BENCHMARK_ROOT>/before/foreground/workspace\n\n \u2713 src/utils/task-result-summary.test.ts > deriveTaskResultSummary > uses the first meaningful paragraph and removes presentation Markdown 2ms\n\n \u2713 src/utils/task-result-summary.test.ts > deriveTaskResultSummary > ends at a complete sentence when bounding a long paragraph 0ms\n \u2713 src/utils/task-result-summary.test.ts > deriveTaskResultSummary > rejects an apparent tail fragment instead of presenting it as a summary 0ms\n \u2713 src/utils/task-result-summary.test.ts > deriveTaskResultSummary > removes redundant English and Arabic summary labels 1ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > settles an early missing output after producing and reading it through a relative path 89ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > credits a passing required check for a task without a named file contract 51ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > settles an unsuccessful probe after a current required check passes without a file contract 33ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > accepts verified output after an unavailable diagnostic interpreter 17ms\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > preserves a failed check through unrelated success and output repair until the check passes 49ms\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > invalidates passing checks after an edit, but not an unchanged diagnostic 31ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > requires the final managed-check exit, not successful log retrieval (exit 0) 325ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > requires the final managed-check exit, not successful log retrieval (exit 1) 327ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > does not erase a timeout with subsequent output 64ms\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > does not accept another turn's passing check 26ms\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > does not reuse a managed exit after editing output (collected before edit: false) 650ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > does not reuse a managed exit after editing output (collected before edit: true) 653ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > does not let another passing check erase a failed check 36ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > invalidates checks when a command changes the observed output 32ms\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > does not invent stale build evidence from inspections and a service start 35ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > keeps the hardline floor for declared checks 4ms\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > rejects invalid declarations without starting the command 2ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > recovers a refused local check only after a fresh authorized check of the same requirement 1ms\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > does not recover the ask boundary 0ms\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > does not recover the unknown-dispatch boundary 0ms\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > does not recover the uncertain boundary 0ms\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > does not recover the connector boundary 0ms\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > does not recover the external boundary 0ms\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > requires the same requirement in the same turn, after the denial and on current output 0ms\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > names the failed requirement after exit 127 instead of accepting readback or another label 0ms\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > names the failed requirement after exit 139 instead of accepting readback or another label 0ms\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > names the failed requirement after exit 1 instead of accepting readback or another label 0ms\n \u2713 src/runtime/command-completion-checks.test.ts > Python and terminal evidence interoperability > recovers a settled Python exploration failure after verified output 75ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > Python and terminal evidence interoperability > lets Python prove the same failed terminal requirement, but not an unrelated one 85ms\n \u2713 src/runtime/command-completion-checks.test.ts > Python and terminal evidence interoperability > preserves a timed-out Python attempt after producing an output 66ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > Python and terminal evidence interoperability > does not settle nested tool effects from a Python exit 29ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > Python and terminal evidence interoperability > rejects invalid Python verification labels before dispatch 1ms\n \u2713 src/runtime/command-completion-checks.test.ts > credits full readback of terminal.run output once 16ms\n \u2713 src/runtime/command-completion-checks.test.ts > credits full readback of execute_code output once 45ms\n \u2713 src/runtime/command-completion-checks.test.ts > finishes nine outputs only after a current check covers the full request 144ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > retains an observed file predicate across unrelated writes without narrowing generic checks 21ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > revalidates a scoped managed process after editing REPORT.md 319ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > revalidates a scoped managed process after editing src/input.txt 319ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > preserves three source checks across a report patch, then invalidates an affected source check 34ms\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > keeps unknown or whole-workspace dependencies conservative: {} 9ms\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > keeps unknown or whole-workspace dependencies conservative: {\"verificationInputs\":[\".\"]} 10ms\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[]} 1ms\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"../src\"]} 1ms\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"/src\"]} 3ms\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"src/**\"]} 0ms\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"src\\\\input\"]} 1ms\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"\"]} 2ms\n\n\n Test Files  2 passed (2)\n      Tests  51 passed (51)\n   Start at  23:33:03\n   Duration  4.46s (transform 637ms, setup 56ms, import 739ms, tests 3.62s, environment 0ms)\n\nclosed with code 0 signal null",
+      "metadata": {
+        "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/runtime/command-completion-checks.test.ts src/utils/task-result-summary.test.ts",
+        "process": {
+          "verification": "requested-unit-tests",
+          "verificationInputs": [
+            "."
+          ],
+          "id": "proc_o9fy7bx1",
+          "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/runtime/command-completion-checks.test.ts src/utils/task-result-summary.test.ts",
+          "cwd": "<BENCHMARK_ROOT>/before/foreground/workspace",
+          "status": "exited",
+          "startedAt": "2026-11-05T23:33:03.550Z",
+          "updatedAt": "2026-11-05T23:33:08.401Z",
+          "exitCode": 0,
+          "signal": null
+        },
+        "running": false,
+        "code": 0,
+        "signal": null,
+        "timedOut": false,
+        "cancelled": false,
+        "_estacoda_context_summary": "Command \"node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/runtime/command-completion-checks.test.ts src/utils/task-result-summary.test.ts\" exited with code 0. stdout: 60 lines / 8486 chars. stderr: 0 lines / 0 chars."
+      }
+    }
+  },
+  {
+    "arm": "before",
+    "case": "foreground",
+    "toolCallId": "tool-call-5a09a7930f4234dfca223192",
+    "input": {
+      "command": "node integration-lab/check.mjs",
+      "verificationInputs": [
+        "."
+      ],
+      "verification": "integration-check",
+      "timeoutMs": null
+    },
+    "result": {
+      "ok": false,
+      "content": "Command failed: exit code 1, status failed.\n\nstarted pid 42382\n\nstderr: node:internal/modules/esm/resolve:275\n    throw new ERR_MODULE_NOT_FOUND(\n          ^\n\nError [ERR_MODULE_NOT_FOUND]: Cannot find module '<BENCHMARK_ROOT>/before/foreground/workspace/integration-lab/unavailable-external-adapter.mjs' imported from <BENCHMARK_ROOT>/before/foreground/workspace/integration-lab/check.mjs\n    at finalizeResolution (node:internal/modules/esm/resolve:275:11)\n    at moduleResolve (node:internal/modules/esm/resolve:865:10)\n    at defaultResolve (node:internal/modules/esm/resolve:991:11)\n    at #cachedDefaultResolve (node:internal/modules/esm/loader:719:20)\n    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:736:38)\n    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:765:52)\n    at #resolve (node:internal/modules/esm/loader:701:17)\n    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:621:35)\n    at ModuleJob.syncLink (node:internal/modules/esm/module_job:160:33)\n    at ModuleJob.link (node:internal/modules/esm/module_job:245:17) {\n  code: 'ERR_MODULE_NOT_FOUND',\n  url: 'file://<BENCHMARK_ROOT>/before/foreground/workspace/integration-lab/unavailable-external-adapter.mjs'\n}\n\nNode.js v24.14.1\n\nclosed with code 1 signal null",
+      "metadata": {
+        "command": "node integration-lab/check.mjs",
+        "process": {
+          "verification": "integration-check",
+          "verificationInputs": [
+            "."
+          ],
+          "id": "proc_qqm2sh2g",
+          "command": "node integration-lab/check.mjs",
+          "cwd": "<BENCHMARK_ROOT>/before/foreground/workspace",
+          "status": "failed",
+          "startedAt": "2026-11-05T23:33:10.845Z",
+          "updatedAt": "2026-11-05T23:33:10.888Z",
+          "exitCode": 1,
+          "signal": null
+        },
+        "running": false,
+        "code": 1,
+        "signal": null,
+        "timedOut": false,
+        "cancelled": false,
+        "_estacoda_context_summary": "Command \"node integration-lab/check.mjs\" exited with code 1. stdout: 0 lines / 0 chars. stderr: 20 lines / 1316 chars."
+      }
+    }
+  },
+  {
+    "arm": "after",
+    "case": "foreground",
+    "toolCallId": "tool-call-4799b82f42fbdb5406cb0f6a",
+    "input": {
+      "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/runtime/command-completion-checks.test.ts src/utils/task-result-summary.test.ts",
+      "verificationInputs": [
+        "."
+      ],
+      "verification": "unit-tests",
+      "timeoutMs": null
+    },
+    "result": {
+      "ok": true,
+      "content": "started pid 42289\n\n RUN  v4.1.6 <BENCHMARK_ROOT>/after/foreground/workspace\n\n \u2713 src/utils/task-result-summary.test.ts > deriveTaskResultSummary > uses the first meaningful paragraph and removes presentation Markdown 1ms\n\n \u2713 src/utils/task-result-summary.test.ts > deriveTaskResultSummary > ends at a complete sentence when bounding a long paragraph 0ms\n \u2713 src/utils/task-result-summary.test.ts > deriveTaskResultSummary > rejects an apparent tail fragment instead of presenting it as a summary 0ms\n \u2713 src/utils/task-result-summary.test.ts > deriveTaskResultSummary > removes redundant English and Arabic summary labels 0ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > settles an early missing output after producing and reading it through a relative path 54ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > credits a passing required check for a task without a named file contract 63ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > settles an unsuccessful probe after a current required check passes without a file contract 94ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > accepts verified output after an unavailable diagnostic interpreter 82ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > preserves a failed check through unrelated success and output repair until the check passes 63ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > invalidates passing checks after an edit, but not an unchanged diagnostic 36ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > requires the final managed-check exit, not successful log retrieval (exit 0) 319ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > requires the final managed-check exit, not successful log retrieval (exit 1) 333ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > does not erase a timeout with subsequent output 65ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > does not accept another turn's passing check 36ms\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > does not reuse a managed exit after editing output (collected before edit: false) 633ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > does not reuse a managed exit after editing output (collected before edit: true) 654ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > does not let another passing check erase a failed check 39ms\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > invalidates checks when a command changes the observed output 54ms\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > does not invent stale build evidence from inspections and a service start 50ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > keeps the hardline floor for declared checks 6ms\n \u2713 src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > rejects invalid declarations without starting the command 2ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > recovers a refused local check only after a fresh authorized check of the same requirement 1ms\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > does not recover the ask boundary 0ms\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > does not recover the unknown-dispatch boundary 0ms\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > does not recover the uncertain boundary 0ms\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > does not recover the connector boundary 0ms\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > does not recover the external boundary 0ms\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > requires the same requirement in the same turn, after the denial and on current output 0ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > names the failed requirement after exit 127 instead of accepting readback or another label 0ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > names the failed requirement after exit 139 instead of accepting readback or another label 0ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > declared check recovery boundaries > names the failed requirement after exit 1 instead of accepting readback or another label 0ms\n \u2713 src/runtime/command-completion-checks.test.ts > Python and terminal evidence interoperability > recovers a settled Python exploration failure after verified output 44ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > Python and terminal evidence interoperability > lets Python prove the same failed terminal requirement, but not an unrelated one 93ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > Python and terminal evidence interoperability > preserves a timed-out Python attempt after producing an output 63ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > Python and terminal evidence interoperability > does not settle nested tool effects from a Python exit 35ms\n \u2713 src/runtime/command-completion-checks.test.ts > Python and terminal evidence interoperability > rejects invalid Python verification labels before dispatch 2ms\n \u2713 src/runtime/command-completion-checks.test.ts > credits full readback of terminal.run output once 16ms\n \u2713 src/runtime/command-completion-checks.test.ts > credits full readback of execute_code output once 36ms\n \u2713 src/runtime/command-completion-checks.test.ts > finishes nine outputs only after a current check covers the full request 184ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > retains an observed file predicate across unrelated writes without narrowing generic checks 44ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > revalidates a scoped managed process after editing REPORT.md 334ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > revalidates a scoped managed process after editing src/input.txt 323ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > preserves three source checks across a report patch, then invalidates an affected source check 44ms\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > keeps unknown or whole-workspace dependencies conservative: {} 14ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > keeps unknown or whole-workspace dependencies conservative: {\"verificationInputs\":[\".\"]} 22ms\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[]} 2ms\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"../src\"]} 5ms\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"/src\"]} 1ms\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"src/**\"]} 1ms\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"src\\\\input\"]} 2ms\n\n \u2713 src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"\"]} 1ms\n\n Test Files  2 passed (2)\n      Tests  51 passed (51)\n   Start at  23:33:08\n   Duration  4.47s (transform 464ms, setup 24ms, import 549ms, tests 3.86s, environment 0ms)\n\nclosed with code 0 signal null",
+      "metadata": {
+        "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/runtime/command-completion-checks.test.ts src/utils/task-result-summary.test.ts",
+        "process": {
+          "verification": "unit-tests",
+          "verificationInputs": [
+            "."
+          ],
+          "id": "proc_046k5o25",
+          "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/runtime/command-completion-checks.test.ts src/utils/task-result-summary.test.ts",
+          "cwd": "<BENCHMARK_ROOT>/after/foreground/workspace",
+          "status": "exited",
+          "startedAt": "2026-11-05T23:33:08.344Z",
+          "updatedAt": "2026-11-05T23:33:13.033Z",
+          "exitCode": 0,
+          "signal": null
+        },
+        "running": false,
+        "code": 0,
+        "signal": null,
+        "timedOut": false,
+        "cancelled": false,
+        "_estacoda_context_summary": "Command \"node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/runtime/command-completion-checks.test.ts src/utils/task-result-summary.test.ts\" exited with code 0. stdout: 60 lines / 8486 chars. stderr: 0 lines / 0 chars."
+      }
+    }
+  },
+  {
+    "arm": "after",
+    "case": "foreground",
+    "toolCallId": "tool-call-c2aed7e5c9f732dea30308b3",
+    "input": {
+      "command": "node integration-lab/check.mjs",
+      "verificationInputs": [
+        "."
+      ],
+      "verification": "integration-check",
+      "timeoutMs": null
+    },
+    "result": {
+      "ok": false,
+      "content": "Command failed: exit code 1, status failed.\n\nstarted pid 42530\n\nstderr: node:internal/modules/esm/resolve:275\n    throw new ERR_MODULE_NOT_FOUND(\n          ^\n\nError [ERR_MODULE_NOT_FOUND]: Cannot find module '<BENCHMARK_ROOT>/after/foreground/workspace/integration-lab/unavailable-external-adapter.mjs' imported from <BENCHMARK_ROOT>/after/foreground/workspace/integration-lab/check.mjs\n    at finalizeResolution (node:internal/modules/esm/resolve:275:11)\n    at moduleResolve (node:internal/modules/esm/resolve:865:10)\n    at defaultResolve (node:internal/modules/esm/resolve:991:11)\n    at #cachedDefaultResolve (node:internal/modules/esm/loader:719:20)\n    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:736:38)\n    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:765:52)\n    at #resolve (node:internal/modules/esm/loader:701:17)\n    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:621:35)\n    at ModuleJob.syncLink (node:internal/modules/esm/module_job:160:33)\n    at ModuleJob.link (node:internal/modules/esm/module_job:245:17) {\n  code: 'ERR_MODULE_NOT_FOUND',\n  url: 'file://<BENCHMARK_ROOT>/after/foreground/workspace/integration-lab/unavailable-external-adapter.mjs'\n}\n\nNode.js v24.14.1\n\nclosed with code 1 signal null",
+      "metadata": {
+        "command": "node integration-lab/check.mjs",
+        "process": {
+          "verification": "integration-check",
+          "verificationInputs": [
+            "."
+          ],
+          "id": "proc_qt9b02fs",
+          "command": "node integration-lab/check.mjs",
+          "cwd": "<BENCHMARK_ROOT>/after/foreground/workspace",
+          "status": "failed",
+          "startedAt": "2026-11-05T23:33:15.881Z",
+          "updatedAt": "2026-11-05T23:33:15.942Z",
+          "exitCode": 1,
+          "signal": null
+        },
+        "running": false,
+        "code": 1,
+        "signal": null,
+        "timedOut": false,
+        "cancelled": false,
+        "_estacoda_context_summary": "Command \"node integration-lab/check.mjs\" exited with code 1. stdout: 0 lines / 0 chars. stderr: 20 lines / 1313 chars."
+      }
+    }
+  },
+  {
+    "arm": "after",
+    "case": "comparison",
+    "toolCallId": "tool-call-6f599ba99866d3f707d2fced",
+    "input": {
+      "command": "cd upstream/superagent && node node_modules/vitest/vitest.mjs run tests/policy.spec.ts tests/core-engine.spec.ts tests/delivery.spec.ts tests/retry-health.spec.ts tests/outbox.spec.ts tests/queue.spec.ts",
+      "verificationInputs": [
+        "."
+      ],
+      "verification": "superagent-checks",
+      "timeoutMs": 1000
+    },
+    "result": {
+      "ok": false,
+      "content": "Command timed out after 1000 ms and was terminated. Inspect partial changes before retrying; use managed process tools for longer jobs.\n\n\n RUN  v4.1.8 <BENCHMARK_ROOT>/after/comparison/workspace/upstream/superagent\n\n \u2713 tests/retry-health.spec.ts (29 tests) 14ms\n \u2713 tests/delivery.spec.ts (15 tests) 40ms",
+      "metadata": {
+        "command": "cd upstream/superagent && node node_modules/vitest/vitest.mjs run tests/policy.spec.ts tests/core-engine.spec.ts tests/delivery.spec.ts tests/retry-health.spec.ts tests/outbox.spec.ts tests/queue.spec.ts",
+        "code": 143,
+        "signal": null,
+        "timeoutMs": 1000,
+        "timedOut": true,
+        "cancelled": false,
+        "outputTruncated": false,
+        "_estacoda_context_summary": "Command \"cd upstream/superagent && node node_modules/vitest/vitest.mjs run tests/policy.spec.ts tests/core-engine.spec.ts tests/delivery.spec.ts tests/retry-health.spec.ts tests/outbox.spec.ts tests/queue.spec.ts\" timed out after 1000 ms. stdout: 5 lines / 209 chars. stderr: 0 lines / 0 chars.",
+        "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+        "verification": "superagent-checks",
+        "verificationInputs": [
+          "."
+        ]
+      }
+    }
+  }
+]

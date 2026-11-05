@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "deferredTurns": [],
+  "pendingReviews": [
+    {
+      "id": "a51bb707-978c-4684-b022-210154585225",
+      "profileId": "default",
+      "sessionId": "a7a20a72-d46e-40a8-b0ab-65321ae92a98",
+      "workspaceIdentityHash": "9a7f34c6ec995c1a3f1f6e5da18c68fc82a0435c80ff96492bafc6948b8de07c"
+    }
+  ],
+  "records": [
+    {
+      "key": "audit estacodas command completion checks and task result summary implementation work in this foreground session without delegation read the actual source and relevant tests then run the existing src runtime command completion checks test ts and src utils task result summary test ts suites using this repositorys vitest configuration also run node integration lab check mjs with terminal run verification label integration check that integration fixture deliberately lacks an optional external adapter do not install anything or edit the fixture to make it pass report the useful implementation findings and observed tests with exact source references explicitly disclose any checks that could not run return the substantial report in chat even if the integration check is incomplete do not claim the whole task is verified::terminal.inspect>file.read>terminal.run",
+      "name": "Audit Estacodas Command Completion Checks workflow",
+      "content": "Reusable workflow: Audit EstaCoda's command-completion checks and task-result summary implementation. Work in this foreground session without delegation. Read the actual source and relevant tests, then run the existing src/runtime/command-completion-checks.test.ts and src/utils/task-result-summary.test.ts suites using this repository's Vitest configuration. Also run node integration-lab/check.mjs with terminal.run verification label integration-check. That integration fixture deliberately lacks an optional external adapter; do not install anything or edit the fixture to make it pass. Report the useful implementation findings and observed tests with exact source references. Explicitly disclose any checks that could not run. Return the substantial report in chat even if the integration check is incomplete; do not claim the whole task is verified",
+      "occurrences": 1,
+      "sourceSessionIds": [
+        "a7a20a72-d46e-40a8-b0ab-65321ae92a98"
+      ],
+      "tools": [
+        "terminal.inspect",
+        "file.read",
+        "terminal.run"
+      ],
+      "requiredToolsets": [
+        "shell-readonly",
+        "coding",
+        "research",
+        "files",
+        "shell-write"
+      ],
+      "bounded": true,
+      "boundedReason": "bounded-local-workflow",
+      "status": "observed",
+      "evidenceIds": [
+        "obs_5f51d059-24b3-4381-be9e-8c3e2aff6924"
+      ],
+      "candidateId": "learn_85ab1e9c-6fd9-4ccd-bf1d-30bf369d9a7f",
+      "candidateKind": "new_or_missing_playbook",
+      "promptHash": "aee542e1d4401d29",
+      "updatedAt": "2026-11-05T23:35:10.852Z"
+    }
+  ]
+}

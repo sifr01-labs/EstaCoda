@@ -1189,8 +1189,8 @@ describe("AgentLoop provider availability gating", () => {
     };
     expect(retryInput.providerTools.map((entry) => entry.function.name)).toEqual([
       "browser_snapshot",
-      "config_mcp_status",
-      "mcp_postman_getCollection"
+      "mcp_postman_getCollection",
+      "config_mcp_status"
     ]);
     expect(retryInput.conversationContinuationState?.capabilityContext).toEqual({
       toolsets: ["browser"],

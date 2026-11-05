@@ -16,6 +16,26 @@ describe("SupervisorTaskBackgroundHost Task ownership", () => {
     for (const tempDir of tempDirs.splice(0)) rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it("keeps a settled workspace runtime alive for bounded review, but still disposes on shutdown", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "estacoda-review-host-")); tempDirs.push(tempDir);
+    const sessionDb = new SQLiteSessionDB({ path: join(tempDir, "sessions.sqlite") });
+    await sessionDb.createSession({ id: "creator-alpha", profileId: "alpha" });
+    const store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "alpha" });
+    const workspace = { canonicalPath: "/workspace/project", identityHash: "workspace-hash" };
+    new TaskOperatorService({ store }).begin({ objective: "Inspect source", workspace, creatorSessionId: "creator-alpha" });
+    let reviewing = true;
+    const dispose = vi.fn(async () => undefined);
+    const host = new SupervisorTaskBackgroundHost({ store,
+      resultService: new TaskResultService({ store, profileId: "alpha", contentRoot: join(tempDir, "results"), sessionDb }),
+      router: { deliverText: async () => new Map() }, ownerId: "review-host", resolveWorkspace: async () => workspace,
+      isWorkspaceTrusted: () => true, createExecutorRuntime: async () => ({ dispose, hasPendingBackgroundWork: () => reviewing,
+        taskAgentExecutor: { kind: "agent", canExecute: () => true,
+          execute: async () => ({ outcome: "succeeded", results: [{ kind: "text", content: "Observed result" }] }) } as unknown as AgentStepExecutor }) });
+    await host.runOnce(); expect(dispose).not.toHaveBeenCalled(); expect(host.hasPendingWork()).toBe(true);
+    reviewing = false; await host.runOnce(); expect(dispose).toHaveBeenCalledOnce();
+    expect(host.hasPendingWork()).toBe(false); await host.dispose(); sessionDb.close();
+  });
+
   it("does not create an executor or dispatch a Task with an active foreground lease", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "estacoda-supervisor-task-owner-"));
     tempDirs.push(tempDir);

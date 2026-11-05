@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "deferredTurns": [],
+  "records": [
+    {
+      "key": "selected:external-agent-runtime-comparison:c92a985777387d77df98207d8cf19c68459b45b5d1b982c931971e9a1714b11b",
+      "name": "external-agent-runtime-comparison refinement",
+      "content": "Selected skill refinement evidence: external-agent-runtime-comparison",
+      "occurrences": 1,
+      "sourceSessionIds": [
+        "8948f850-3b2a-44c1-a21e-7aa2ca52810b"
+      ],
+      "tools": [],
+      "requiredToolsets": [
+        "files"
+      ],
+      "bounded": true,
+      "boundedReason": "selected-skill-turn",
+      "status": "candidate",
+      "evidenceIds": [
+        "obs_8f6079b3-336b-4f38-8f5c-6c6665652b60"
+      ],
+      "candidateId": "learn_ec748774-eb74-4a9b-a0dc-bd2e15e9e1c8",
+      "candidateKind": "selected_skill_refinement",
+      "promptHash": "b755c6e505723c29",
+      "selectedSkillName": "external-agent-runtime-comparison",
+      "updatedAt": "2026-11-05T23:29:56.323Z"
+    }
+  ]
+}

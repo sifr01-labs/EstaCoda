@@ -1,0 +1,106 @@
+{
+  "arm": "after",
+  "test": "comparison",
+  "foregroundOutcome": "partially_completed",
+  "elapsedMs": 208166,
+  "providerCalls": 40,
+  "inputTokens": 832814,
+  "outputTokens": 12463,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "waiting_for_input",
+      "steps": [
+        {
+          "id": "step_cde07419-0113-4618-b86a-a6cddf470966",
+          "title": "Delegated work 1",
+          "role": "worker",
+          "status": "waiting_for_input",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "failed",
+              "failure": {
+                "class": "tool-error",
+                "message": "Agent Step execution failed (tool-error).",
+                "retryable": false,
+                "uncertainSideEffects": true
+              },
+              "providerCalls": 13,
+              "totalTokens": 289224
+            }
+          ],
+          "results": []
+        },
+        {
+          "id": "step_ec097b8c-a9f4-42b4-be14-a344a83b88b8",
+          "title": "Delegated work 2",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 15,
+              "totalTokens": 388833
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 16211,
+              "sha256": "sha256:68ed0d9d2a5bd512bf31749ec0d28bdd3571c0d2dd2da9916a03c6001783870e"
+            }
+          ]
+        },
+        {
+          "id": "step_e5ca82e6-c3c1-4cc6-b085-ddf475be256c",
+          "title": "Delegated work 3",
+          "role": "worker",
+          "status": "ready",
+          "tokenLimit": 1000000,
+          "attempts": [],
+          "results": []
+        },
+        {
+          "id": "step_b4b5a2a2-22f0-435c-b29b-6ab4a62dd4d0",
+          "title": "Synthesize delegated results",
+          "role": "synthesis",
+          "status": "pending",
+          "tokenLimit": 1000000,
+          "attempts": [],
+          "results": []
+        },
+        {
+          "id": "step_738e8671-e79a-4aa5-b802-875489c7b4a4",
+          "title": "Save and verify research report",
+          "role": "report-delivery",
+          "status": "pending",
+          "tokenLimit": 1000000,
+          "attempts": [],
+          "results": []
+        }
+      ]
+    }
+  ],
+  "reports": [],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 1,
+    "pendingReviews": 0,
+    "drafts": [],
+    "observations": [
+      {
+        "sessionId": "child_fc5bb2f1-a864-4a25-b1dc-b4a34f9c2c80",
+        "outcome": "partial",
+        "timestamp": "2026-11-05T23:35:31.808Z"
+      },
+      {
+        "sessionId": "child_30e784ab-5d4b-40cf-ad27-57ff2a7d4326",
+        "outcome": "succeeded",
+        "timestamp": "2026-11-05T23:36:03.939Z"
+      }
+    ]
+  }
+}

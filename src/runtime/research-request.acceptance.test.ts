@@ -880,7 +880,9 @@ describe.sequential("file output completion requirements", () => {
     const result = await h.turn("Save report.md and read back the file.");
     expect(result.finalOutcome?.status).toBe("partially_completed");
     expect(result.text).toContain("matching readback");
-    expect(result.text).not.toContain("Saved and verified");
+    expect(result.text.split("Partial draft — not accepted")[0]).not.toContain("Saved and verified");
+    expect(result.text).toContain("Claims below are not runtime-verified results");
+    expect(result.text).toContain("Saved and verified report.md."); // Preserved only as an unaccepted candidate.
     expect(result.providerExecution?.response?.content ?? "").not.toContain("Saved and verified");
     scriptConsumed(h);
   });

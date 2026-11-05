@@ -1,0 +1,20 @@
+{
+  "text": "Required validation remains incomplete: integration-check. No successful current result was recorded for these checks.",
+  "finalOutcome": {
+    "status": "partially_completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-deb920bc9fb3794bc97d3db4",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/runtime/command-completion-checks.test.ts ...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "completionValidationFailure": "Declared checks remain unresolved: [\"integration-check\"]. Verify those requirements on the current result using an authorized command and reuse the exact verification label. A missing interpreter, crash, failed exit, or stale check is not a passing validation. Reading files or passing a differently named check does not settle these requirements. Do not retry denied actions, bypass permissions, or rerun uncertain side effects. If blocked, report what remains unverified."
+}

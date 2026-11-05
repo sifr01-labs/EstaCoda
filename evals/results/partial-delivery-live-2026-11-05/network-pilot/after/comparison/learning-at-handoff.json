@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "deferredTurns": [],
+  "pendingReviews": [
+    {
+      "id": "7b1de3af-8ac2-4a93-a699-fb1e37e5d0d8",
+      "profileId": "default",
+      "sessionId": "39115ba0-04aa-4352-9372-a569921248d0",
+      "workspaceIdentityHash": "e5adbb2c7da0acf8b356f8b94322bcb44cf91c198635ba30b97cba1b6a98a83c"
+    }
+  ],
+  "records": [
+    {
+      "key": "selected:external-agent-runtime-comparison:7ca156329a73430c890822dabc499d42d6bb69bbc17a14e5fd335c06796f1535",
+      "name": "external-agent-runtime-comparison refinement",
+      "content": "Selected skill refinement evidence: external-agent-runtime-comparison",
+      "occurrences": 1,
+      "sourceSessionIds": [
+        "39115ba0-04aa-4352-9372-a569921248d0"
+      ],
+      "tools": [],
+      "requiredToolsets": [
+        "files"
+      ],
+      "bounded": true,
+      "boundedReason": "selected-skill-turn",
+      "status": "candidate",
+      "evidenceIds": [
+        "obs_4d5cde33-1bdc-4048-a881-51cff0aaf3dc"
+      ],
+      "candidateId": "learn_e79b8220-0fbd-401a-a065-12af48b602b0",
+      "candidateKind": "selected_skill_refinement",
+      "promptHash": "b755c6e505723c29",
+      "selectedSkillName": "external-agent-runtime-comparison",
+      "updatedAt": "2026-11-05T23:29:57.451Z"
+    }
+  ]
+}

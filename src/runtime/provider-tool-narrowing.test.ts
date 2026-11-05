@@ -710,3 +710,19 @@ it('does not reintroduce prohibited core tools through process dependencies or e
   expect(selected).not.toContain('file_write');
   expect(selected).not.toContain('process_stop');
 });
+
+it("keeps research, required skill tools and delegation ahead of optional schema clutter", () => {
+  const catalog = buildProviderToolSchemaCatalog({ tools: [
+    ...Array.from({ length: 110 }, (_, i) => tool(`config.extra${i}`, ["configuration"])),
+    tool("capability.discover", ["core"]), tool("capability.request", ["core"]),
+    tool("file.read", ["files"]), tool("file.grep", ["files"]), tool("web.search", ["web"]),
+    tool("delegate_task", ["core"], undefined, "workspace-write")
+  ] });
+  const selectedSkill = { name: "comparison", requiredToolsets: ["files"], optionalToolsets: ["configuration", "core"], playbook: [] } as unknown as SkillDefinition;
+  const selection = selectProviderToolsForTurn({ catalog, intent: intent(0.8, [], "research"), selectedSkill, userText: "Compare the codebases" });
+  expect(names(selection.initialTools)).toEqual(expect.arrayContaining(["file_read", "file_grep", "web_search", "delegate_task", "capability_request", "capability_discover"]));
+  expect(selection.budgetOmittedTools?.every(name => name.startsWith("config_extra"))).toBe(true);
+  expect(selection.initialTools.length).toBeLessThanOrEqual(100);
+  const absent = buildProviderToolSchemaCatalog({ tools: [tool("file.read", ["files"])] });
+  expect(names(narrowProviderToolsForTurn({ catalog: absent, intent: intent(0.8, [], "research"), selectedSkill }))).not.toContain("delegate_task");
+});

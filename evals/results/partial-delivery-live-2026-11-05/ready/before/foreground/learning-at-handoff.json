@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "deferredTurns": [],
+  "records": [
+    {
+      "key": "audit estacodas command completion checks and task result summary implementation work in this foreground session without delegation read the actual source and relevant tests then run the existing src runtime command completion checks test ts and src utils task result summary test ts suites using this repositorys vitest configuration also run node integration lab check mjs with terminal run verification label integration check that integration fixture deliberately lacks an optional external adapter do not install anything or edit the fixture to make it pass report the useful implementation findings and observed tests with exact source references explicitly disclose any checks that could not run return the substantial report in chat even if the integration check is incomplete do not claim the whole task is verified::terminal.inspect>file.read>terminal.run",
+      "name": "Audit Estacodas Command Completion Checks workflow",
+      "content": "Reusable workflow: Audit EstaCoda's command-completion checks and task-result summary implementation. Work in this foreground session without delegation. Read the actual source and relevant tests, then run the existing src/runtime/command-completion-checks.test.ts and src/utils/task-result-summary.test.ts suites using this repository's Vitest configuration. Also run node integration-lab/check.mjs with terminal.run verification label integration-check. That integration fixture deliberately lacks an optional external adapter; do not install anything or edit the fixture to make it pass. Report the useful implementation findings and observed tests with exact source references. Explicitly disclose any checks that could not run. Return the substantial report in chat even if the integration check is incomplete; do not claim the whole task is verified",
+      "occurrences": 1,
+      "sourceSessionIds": [
+        "92066934-5df2-4a58-8dad-5110ccc5cf2f"
+      ],
+      "tools": [
+        "terminal.inspect",
+        "file.read",
+        "terminal.run"
+      ],
+      "requiredToolsets": [
+        "shell-readonly",
+        "coding",
+        "research",
+        "files",
+        "shell-write"
+      ],
+      "bounded": true,
+      "boundedReason": "bounded-local-workflow",
+      "status": "observed",
+      "evidenceIds": [
+        "obs_830aef6b-ca27-418b-aa31-6979a1753977"
+      ],
+      "candidateId": "learn_8328484c-aaf0-4580-9872-f078357ad9c1",
+      "candidateKind": "new_or_missing_playbook",
+      "promptHash": "aee542e1d4401d29",
+      "updatedAt": "2026-11-05T23:35:19.461Z"
+    }
+  ]
+}

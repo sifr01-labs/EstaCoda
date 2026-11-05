@@ -1,0 +1,34 @@
+{
+  "arm": "after",
+  "test": "comparison",
+  "foregroundOutcome": "failed",
+  "elapsedMs": 3316,
+  "providerCalls": 3,
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "usageComplete": false,
+  "pricingComplete": false,
+  "tasks": [],
+  "reports": [],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "pendingReviews": 1,
+    "drafts": [
+      {
+        "status": "failed",
+        "failure": "provider-failure",
+        "attempts": 1,
+        "proposalCreated": false
+      }
+    ],
+    "observations": [
+      {
+        "sessionId": "39115ba0-04aa-4352-9372-a569921248d0",
+        "outcome": "failed",
+        "findings": [],
+        "timestamp": "2026-11-05T23:29:57.446Z"
+      }
+    ]
+  }
+}

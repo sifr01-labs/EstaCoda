@@ -44,7 +44,7 @@ describe("completion recovery through the production runtime", () => {
               repaired = true;
             }
           }
-          return { ok: true, provider: model.provider, model: model.id, content: operation ? "" : "The requested work is complete.",
+          return { ok: true, provider: model.provider, model: model.id, content: operation ? "" : scenario === "unrepaired-check" ? "Inspection found output.txt contains ready. The behavior check crashed; correctness remains unverified." : "The requested work is complete.",
             ...(operation ? { raw: { output: [{ type: "function_call", call_id: `operation-${calls}`, name: operation.name, arguments: JSON.stringify(operation.input) }] } } : {}) };
         }
       });
@@ -63,6 +63,9 @@ describe("completion recovery through the production runtime", () => {
         const finalOutput = await readFile(join(artifacts, "stdout.txt"), "utf8");
         expect(finalOutput).toContain("Required validation remains incomplete: behavior-check");
         expect(finalOutput).not.toContain("The requested work is complete.");
+        expect(finalOutput).toContain("Partial draft — not accepted");
+        expect(finalOutput).toContain("Inspection found output.txt contains ready.");
+        expect(finalOutput).toContain("correctness remains unverified");
       }
       const events = (await readFile(join(artifacts, "events.ndjson"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
       if (scenario === "denied-check") {

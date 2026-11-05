@@ -220,15 +220,21 @@ export function selectProviderToolsForTurn(input: {
     }
     if (processCompanions.size > 0 && initialTools.some(schema => schema.function.name === "terminal_run")) processCompanions.add("terminal_run");
   }
-  // Reserve discovery first, then the core working set before optional routing.
-  initialTools.sort((a, b) => {
-    const rank = (name: string) => recoveryNames.has(name) ? 2 : CORE_WORKING_TOOLS.has(name) ? 1 : 0;
-    return rank(input.catalog.aliases.get(b.function.name) ?? b.function.name) - rank(input.catalog.aliases.get(a.function.name) ?? a.function.name);
-  });
-  const budget = budgetProviderTools({
-    tools: initialTools,
-    priorityNames: new Set([...processCompanions, ...input.catalog.entries.filter((entry) => entry.tool.name === "config.provider.execution_status" || exactRequestTools.has(entry.tool.name) || CORE_WORKING_TOOLS.has(entry.tool.name)).map((entry) => entry.schema.function.name)])
-  });
+  // Relevance controls exposure order, never execution authority. Skill-required
+  // and policy tools precede broadly routed optional configuration/browser tools.
+  const requiredSkillToolsets = new Set(input.selectedSkill?.requiredToolsets ?? []);
+  const definitions = new Map(input.catalog.entries.map(entry => [entry.schema.function.name, entry.tool]));
+  const rank = (schema: OpenAICompatibleToolSchema) => {
+    const tool = definitions.get(schema.function.name)!;
+    if (recoveryNames.has(tool.name) || CORE_WORKING_TOOLS.has(tool.name)) return 5;
+    if (exactRequestTools.has(tool.name) || processCompanions.has(schema.function.name) || tool.name === "config.provider.execution_status") return 4;
+    if (tool.toolsets.some(set => requiredSkillToolsets.has(set))) return 3;
+    if (policyRiskClasses.has(tool.riskClass) && tool.toolsets.some(set => policyToolsets.has(set))) return 2;
+    if (tool.name === "delegate_task" && (input.selectedSkill !== undefined || includePlan)) return 2;
+    return 0;
+  };
+  initialTools.sort((a, b) => rank(b) - rank(a));
+  const budget = budgetProviderTools({ tools: initialTools });
   return {
     initialTools: budget.tools,
     policy: policy.name,

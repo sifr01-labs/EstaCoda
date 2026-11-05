@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "deferredTurns": [],
+  "pendingReviews": [
+    {
+      "id": "b5b2655e-aac5-4a2a-ba69-4ce45304a882",
+      "profileId": "default",
+      "sessionId": "69c95a6f-27bf-4fec-82a2-40479c324916",
+      "workspaceIdentityHash": "6ad2410040130ca97722ee56a93fd92f4227b523f0c532b98fcbd9e276d95094"
+    }
+  ],
+  "records": []
+}
