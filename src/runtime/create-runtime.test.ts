@@ -1601,6 +1601,7 @@ describe("createRuntime MCP trust gating", () => {
               "timeoutMs",
               "verification",
               "verificationInputs",
+              "waitMs",
             ],
             "toolsets": [
               "shell-readonly",

@@ -25,6 +25,9 @@ export type ManagedProcessRecord = {
   updatedAt: string;
   exitCode?: number | null;
   signal?: NodeJS.Signals | null;
+  /** Explicit execution deadline, distinct from an observation wait. */
+  timeoutMs?: number;
+  timedOut?: boolean;
 };
 
 export type ManagedProcessLog = {
@@ -81,7 +84,8 @@ export class ProcessManager {
     options.executionLease?.own({ release: () => this.dispose() });
   }
 
-  async start(command: string, signal?: AbortSignal, options: { input?: boolean; continuationSignal?: AbortSignal; requirements?: RequestRequirements; visibleTurnId?: string; verification?: string; verificationInputs?: string[]; purpose?: "service" | "job" } = {}): Promise<ManagedProcessRecord> {
+  async start(command: string, signal?: AbortSignal, options: { input?: boolean; continuationSignal?: AbortSignal; requirements?: RequestRequirements; visibleTurnId?: string; verification?: string; verificationInputs?: string[]; purpose?: "service" | "job"; timeoutMs?: number } = {}): Promise<ManagedProcessRecord> {
+    if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 1 || options.timeoutMs > 2_147_483_647)) throw new Error("Invalid process execution deadline.");
     signal?.throwIfAborted();
     options.continuationSignal?.throwIfAborted();
     const record = await this.#createRecord(command, "running");
@@ -91,7 +95,16 @@ export class ProcessManager {
     if (options.continuationSignal?.aborted) { this.#processes.delete(record.id); options.continuationSignal.throwIfAborted(); }
     record.fileObservation = await beginCommandFileObservation(this.#files, options.requirements, options.visibleTurnId, record.purpose === "service");
     if (signal?.aborted || options.continuationSignal?.aborted) { this.#processes.delete(record.id); (signal?.aborted ? signal : options.continuationSignal)!.throwIfAborted(); }
+    record.timeoutMs = options.timeoutMs;
     this.#spawn(record, undefined, options.input ?? true);
+    if (record.child && record.status === "running" && options.timeoutMs !== undefined) {
+      const timer = setTimeout(() => {
+        record.timedOut = true;
+        void this.stop(record.id).catch(() => this.#appendLog(record, "system", "Deadline cleanup could not be confirmed; execution scope retains ownership."));
+      }, options.timeoutMs);
+      timer.unref();
+      record.child.once("close", () => clearTimeout(timer));
+    }
     if (record.child && record.status === "running" && options.continuationSignal) {
       const continuationSignal = options.continuationSignal;
       const onAbort = () => {
@@ -406,7 +419,8 @@ function toRecord(process: InternalManagedProcess): ManagedProcessRecord {
     startedAt: process.startedAt,
     updatedAt: process.updatedAt,
     exitCode: process.exitCode,
-    signal: process.signal
+    signal: process.signal,
+    ...(process.timeoutMs === undefined ? {} : { timeoutMs: process.timeoutMs, timedOut: process.timedOut ?? false })
   };
 }
 

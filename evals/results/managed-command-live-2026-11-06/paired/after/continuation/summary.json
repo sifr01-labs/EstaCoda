@@ -1,0 +1,96 @@
+{
+  "arm": "after",
+  "test": "continuation",
+  "foregroundOutcome": "completed",
+  "elapsedMs": 227629,
+  "providerCalls": 19,
+  "inputTokens": 213714,
+  "outputTokens": 7738,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "completed",
+      "settlementDurationMs": 194467,
+      "steps": [
+        {
+          "id": "step_f64dc779-1ffa-4244-8389-a20f784125a3",
+          "title": "Delegated work",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 13,
+              "totalTokens": 177744
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 14174,
+              "sha256": "sha256:514986491c1ad89d3e5b603da83adef743ce35528413d7d7817d75bf51536611"
+            }
+          ]
+        },
+        {
+          "id": "step_c3289b19-1ed8-43d5-ad49-9165c88899cb",
+          "title": "Synthesize delegated results",
+          "role": "synthesis",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 2,
+              "totalTokens": 14361
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 14168,
+              "sha256": "sha256:8bfde69915fc26226b1c482ff3267bbf313a7632cc292ad907177edffd01a4c8"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "reports": [],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "pendingReviews": 0,
+    "drafts": [],
+    "observations": [
+      {
+        "sessionId": "0e5ce7ee-307c-4a00-826e-42f43030ae3c",
+        "outcome": "succeeded",
+        "settledTasks": {
+          "id": "72ef98549f2d68ea028164d3fe85de7e4e1da6706145c5fcad5d9e9a5a29cebb",
+          "taskIds": [
+            "task_736e4275-520f-41bf-b895-abcbf77b978d"
+          ],
+          "failures": [],
+          "acceptedResults": 2,
+          "diagnosticResults": 0,
+          "results": [
+            {
+              "taskId": "task_736e4275-520f-41bf-b895-abcbf77b978d",
+              "resultId": "73d33e91-d02a-48db-a186-397fb2b03e27",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_736e4275-520f-41bf-b895-abcbf77b978d",
+              "resultId": "8d7211ff-8d2f-4ba5-a42c-fb045e610b3a",
+              "disposition": "accepted"
+            }
+          ]
+        },
+        "timestamp": "2026-11-06T10:23:58.983Z"
+      }
+    ]
+  }
+}

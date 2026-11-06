@@ -1,0 +1,469 @@
+[
+  {
+    "sessionId": "child_e848385a-6bbb-4922-8922-feaab5eba0b3",
+    "callId": "tool-call-9496a49a453130304b09b4e5",
+    "tool": "terminal.run",
+    "input": {
+      "command": "node --version; test -f node_modules/vitest/vitest.mjs && echo VITEST_PRESENT; git status --short; node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/process/managed-command.test.ts src/runtime/recoverable-draft.test.ts src/tasks/agent-step-executor.test.ts src/tasks/task-scheduler.test.ts",
+      "verificationInputs": [
+        "."
+      ],
+      "verification": "selected-runtime-tests",
+      "waitMs": 1000,
+      "timeoutMs": null
+    },
+    "ok": true,
+    "process": {
+      "verification": "selected-runtime-tests",
+      "verificationInputs": [
+        "."
+      ],
+      "id": "proc_b34jgpj9",
+      "command": "node --version; test -f node_modules/vitest/vitest.mjs && echo VITEST_PRESENT; git status --short; node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/process/managed-command.test.ts src/runtime/recoverable-draft.test.ts src/tasks/agent-step-executor.test.ts src/tasks/task-scheduler.test.ts",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "running",
+      "startedAt": "2026-11-06T10:13:36.220Z",
+      "updatedAt": "2026-11-06T10:13:36.220Z"
+    },
+    "running": true,
+    "code": null,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "7bd4a6e5cbf103bc0ba60295f67f3225310843b629a64dc465efc6af02103651",
+    "contentTail": "Command is still running as proc_b34jgpj9. Use process.logs to wait for completion; process.stop cancels it. Do not restart the command.\n\nstarted pid 98995\n\nv24.14.1\n\nVITEST_PRESENT\n\n?? UPSTREAM.json\n?? node_modules\n?? upstream/\n\n RUN  v4.1.6 <BENCHMARK_ROOT>/after/comparison/workspace\n\n ✓ src/runtime/recoverable-draft.test.ts > unaccepted draft disclosure > retains qualified findings from settled exploration and removes reasoning and credentials 3ms\n\n ✓ src/runtime/recoverable-draft.test.ts > unaccepted draft disclosure > withholds privileged or uncertain output 0ms\n ✓ src/runtime/recoverable-draft.test.ts > unaccepted draft disclosure > withholds privileged or uncertain output 0ms\n\n ✓ src/runtime/recoverable-draft.test.ts > unaccepted draft disclosure > withholds privileged or uncertain output 0ms\n\n ✓ src/runtime/recoverable-draft.test.ts > unaccepted draft disclosure > withholds privileged or uncertain output 0ms\n\n ✓ src/runtime/recoverable-draft.test.ts > unaccepted draft disclosure > does not disclose denied-only work, but preserves unrelated allowed observations 1ms\n\n ✓ src/process/managed-command.test.ts > managed terminal continuation > yields without killing or restarting a command (timeoutMs=undefined) 321ms"
+  },
+  {
+    "sessionId": "child_e848385a-6bbb-4922-8922-feaab5eba0b3",
+    "callId": "tool-call-3009e373725787c80deed366",
+    "tool": "process.logs",
+    "input": {
+      "id": "proc_b34jgpj9",
+      "tailChars": 16000,
+      "waitMs": 1000
+    },
+    "ok": true,
+    "process": {
+      "verification": "selected-runtime-tests",
+      "verificationInputs": [
+        "."
+      ],
+      "id": "proc_b34jgpj9",
+      "command": "node --version; test -f node_modules/vitest/vitest.mjs && echo VITEST_PRESENT; git status --short; node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/process/managed-command.test.ts src/runtime/recoverable-draft.test.ts src/tasks/agent-step-executor.test.ts src/tasks/task-scheduler.test.ts",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "running",
+      "startedAt": "2026-11-06T10:13:36.220Z",
+      "updatedAt": "2026-11-06T10:13:36.220Z"
+    },
+    "contentSha256": "0b80362b321ae25c8fb587477a517dcbf0c92896353e0638508ed30690eaadff",
+    "contentTail": "nt write is invalid 109ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > exports accepted report bytes through governed tools without a model: success 132ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > persists operator-wait Step and Task transitions in the event journal 108ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > exports accepted report bytes through governed tools without a model: tampered 112ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > settles a Task as partial after an independent Step exhausts mark-partial policy 110ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > exports accepted report bytes through governed tools without a model: denied 105ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > persists cancellation, aborts local execution, and rejects late success 151ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > refuses deterministic delivery without an accepted source and never calls a model 95ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > does not invoke an admitted Attempt after cancellation wins the launch microtask race 103ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > renews leases from executor heartbeat 106ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > preserves local research with read limitations: corrected 101ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > preserves local research with read limitations: alternative 99ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > renews within the bounded first interval while an executor is idle before its own heartbeat loop 108ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > preserves local research with read limitations: worker-contract-only 102ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > renews only through a bounded grace after local execution abort 109ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > preserves local research with read limitations: missing-evidence 101ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > preserves local research with read limitations: uncited-evidence 94ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > preserves validated output after step tokens exhaustion without accepting coverage 104ms"
+  },
+  {
+    "sessionId": "child_e848385a-6bbb-4922-8922-feaab5eba0b3",
+    "callId": "tool-call-04913521ac507d65152ea20d",
+    "tool": "process.logs",
+    "input": {
+      "id": "proc_b34jgpj9",
+      "tailChars": 6000,
+      "waitMs": 1000
+    },
+    "ok": true,
+    "process": {
+      "verification": "selected-runtime-tests",
+      "verificationInputs": [
+        "."
+      ],
+      "id": "proc_b34jgpj9",
+      "command": "node --version; test -f node_modules/vitest/vitest.mjs && echo VITEST_PRESENT; git status --short; node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/process/managed-command.test.ts src/runtime/recoverable-draft.test.ts src/tasks/agent-step-executor.test.ts src/tasks/task-scheduler.test.ts",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "running",
+      "startedAt": "2026-11-06T10:13:36.220Z",
+      "updatedAt": "2026-11-06T10:13:36.220Z"
+    },
+    "contentSha256": "949ff1e32e774570202ce171123c65e99ccf1fe257e17dd8de1d64200bf18bf2",
+    "contentTail": "h cited later evidence: empty-read 89ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > abandons only optional pre-fetch secret URLs with cited later evidence: denied 88ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > abandons only optional pre-fetch secret URLs with cited later evidence: denied-alternative 87ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > abandons only optional pre-fetch secret URLs with cited later evidence: required-step 87ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > abandons only optional pre-fetch secret URLs with cited later evidence: required-scope 90ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > abandons only optional pre-fetch secret URLs with cited later evidence: required-parent 88ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > abandons only optional pre-fetch secret URLs with cited later evidence: rejected-citation 88ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > abandons only optional pre-fetch secret URLs with cited later evidence: unsafe-url 87ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > abandons only optional pre-fetch secret URLs with cited later evidence: redirect-secret-in-url 88ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > abandons only optional pre-fetch secret URLs with cited later evidence: network-disabled 87ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > abandons only optional pre-fetch secret URLs with cited later evidence: unavailable 87ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > abandons only optional pre-fetch secret URLs with cited later evidence: uncertain-effect 91ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > abandons only optional pre-fetch secret URLs with cited later evidence: other-failure 89ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > handles bounded passage recovery: recovered 91ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > handles bounded passage recovery: offset 91ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > handles bounded passage recovery: unrecovered 88ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > handles bounded passage recovery: different-source 87ms"
+  },
+  {
+    "sessionId": "child_e848385a-6bbb-4922-8922-feaab5eba0b3",
+    "callId": "tool-call-144850bd22426e4c403078e3",
+    "tool": "process.logs",
+    "input": {
+      "id": "proc_b34jgpj9",
+      "tailChars": 3000,
+      "waitMs": 1000
+    },
+    "ok": true,
+    "process": {
+      "verification": "selected-runtime-tests",
+      "verificationInputs": [
+        "."
+      ],
+      "id": "proc_b34jgpj9",
+      "command": "node --version; test -f node_modules/vitest/vitest.mjs && echo VITEST_PRESENT; git status --short; node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/process/managed-command.test.ts src/runtime/recoverable-draft.test.ts src/tasks/agent-step-executor.test.ts src/tasks/task-scheduler.test.ts",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "exited",
+      "startedAt": "2026-11-06T10:13:36.220Z",
+      "updatedAt": "2026-11-06T10:13:46.903Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    "contentSha256": "faf84c0387b69d08308f9fdf936fe80c87b5ffc3eda081a23e3dbfaf9f3d4e2a",
+    "contentTail": " > AgentStepExecutor > abandons only optional pre-fetch secret URLs with cited later evidence: other-failure 89ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > handles bounded passage recovery: recovered 91ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > handles bounded passage recovery: offset 91ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > handles bounded passage recovery: unrecovered 88ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > handles bounded passage recovery: different-source 87ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > handles bounded passage recovery: denied 87ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > handles bounded passage recovery: empty 89ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > accepts an exact read retry that succeeds later in the same Attempt 88ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > does not publish diagnostic output from denied or mutating tool activity 87ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > fails closed before child construction when live workspace trust is absent 88ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > fails closed before child construction when the scheduler provides no Attempt lease 91ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > cancels and cleans up a child resolved after construction-time cancellation 141ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > checkpoints and preserves a child resolved after construction-time host handoff 142ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > propagates the exact provider spending denial to the Task scheduler 89ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > continues from a checkpointed worker session and leaves it open during host handoff 87ms\n[stdout]  ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > captures artifact bytes only through the injected resolver and enforces the declared size 94ms\n[stdout] \n[stdout]  Test Files  4 passed (4)\n[stdout]       Tests  172 passed (172)\n[stdout]    Start at  10:13:36\n[stdout]    Duration  10.40s (transform 1.65s, setup 59ms, import 2.08s, tests 17.86s, environment 0ms)\n[stdout] \n[system] closed with code 0 signal null"
+  },
+  {
+    "sessionId": "child_e848385a-6bbb-4922-8922-feaab5eba0b3",
+    "callId": "tool-call-2307fdaed658b12fdafecf08",
+    "tool": "terminal.run",
+    "input": {
+      "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/security/dispatch-authorization.test.ts src/runtime/command-completion-checks.test.ts src/memory/memory-hardening-evals.test.ts src/runtime/connector-completion.test.ts",
+      "verificationInputs": [
+        "."
+      ],
+      "verification": "negative-security-tests",
+      "waitMs": 1000,
+      "timeoutMs": null
+    },
+    "ok": true,
+    "process": {
+      "verification": "negative-security-tests",
+      "verificationInputs": [
+        "."
+      ],
+      "id": "proc_seqngers",
+      "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/security/dispatch-authorization.test.ts src/runtime/command-completion-checks.test.ts src/memory/memory-hardening-evals.test.ts src/runtime/connector-completion.test.ts",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "running",
+      "startedAt": "2026-11-06T10:14:28.173Z",
+      "updatedAt": "2026-11-06T10:14:28.173Z"
+    },
+    "running": true,
+    "code": null,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "ddfce9add3c90054309c40e45fe109e0af698867e83e345098f6833b63d09768",
+    "contentTail": "er defaults without broad substring matching 1ms\n ✓ src/memory/memory-hardening-evals.test.ts > memory hardening evals > keeps unrelated deterministic preferences active together 1ms\n\n ✓ src/memory/memory-hardening-evals.test.ts > memory hardening evals > keeps project facts out of user-preference conflict categories 1ms\n ✓ src/memory/memory-hardening-evals.test.ts > memory hardening evals > does not supersede project facts with preference-like content 1ms\n\n ✓ src/memory/memory-hardening-evals.test.ts > memory hardening evals > loads existing promotion records without persisted category metadata 1ms\n\n ✓ src/memory/memory-hardening-evals.test.ts > memory hardening evals > strengthens an existing canonical promotion instead of creating duplicate variant records 1ms\n\n ✓ src/memory/memory-hardening-evals.test.ts > memory hardening evals > promotes preference and project fact from compound direct user statements 2ms\n\n ✓ src/memory/memory-hardening-evals.test.ts > memory hardening evals > promotes preference and project fact from newline-separated direct user statements 1ms\n\n ✓ src/memory/memory-hardening-evals.test.ts > memory hardening evals > does not resurrect manually deleted markdown from stale promotion metadata 1ms\n\n ✓ src/memory/memory-hardening-evals.test.ts > memory hardening evals > keeps superseded preferences inspectable but out of prompt memory blocks 1ms\n\n ✓ src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > settles an early missing output after producing and reading it through a relative path 52ms\n\n ✓ src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > credits a passing required check for a task without a named file contract 26ms\n ✓ src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > settles an unsuccessful probe after a current required check passes without a file contract 16ms\n\n ✓ src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > accepts verified output after an unavailable diagnostic interpreter 9ms\n\n ✓ src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > preserves a failed check through unrelated success and output repair until the check passes 21ms\n ✓ src/runtime/command-completion-checks.test.ts > completion checks and unsuccessful approaches > invalidates passing checks after an edit, but not an unchanged diagnostic 17ms"
+  },
+  {
+    "sessionId": "child_e848385a-6bbb-4922-8922-feaab5eba0b3",
+    "callId": "tool-call-86757f9e28002c2ae253d49d",
+    "tool": "process.logs",
+    "input": {
+      "id": "proc_seqngers",
+      "tailChars": 5000,
+      "waitMs": 1000
+    },
+    "ok": true,
+    "process": {
+      "verification": "negative-security-tests",
+      "verificationInputs": [
+        "."
+      ],
+      "id": "proc_seqngers",
+      "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/security/dispatch-authorization.test.ts src/runtime/command-completion-checks.test.ts src/memory/memory-hardening-evals.test.ts src/runtime/connector-completion.test.ts",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "exited",
+      "startedAt": "2026-11-06T10:14:28.173Z",
+      "updatedAt": "2026-11-06T10:14:32.137Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    "contentSha256": "14fa19fb45edc8417f7ee34f85f15347c00b101f0decea8e07f9d0253b593e39",
+    "contentTail": " src/runtime/command-completion-checks.test.ts > credits full readback of execute_code output once 20ms\n[stdout]  ✓ src/runtime/command-completion-checks.test.ts > finishes nine outputs only after a current check covers the full request 91ms\n[stdout]  ✓ src/runtime/command-completion-checks.test.ts > retains an observed file predicate across unrelated writes without narrowing generic checks 17ms\n[stdout]  ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > revalidates a scoped managed process after editing REPORT.md 323ms\n[stdout]  ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > revalidates a scoped managed process after editing src/input.txt 327ms\n[stdout]  ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > preserves three source checks across a report patch, then invalidates an affected source check 44ms\n[stdout]  ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > keeps unknown or whole-workspace dependencies conservative: {} 9ms\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > keeps unknown or whole-workspace dependencies conservative: {\"verificationInputs\":[\".\"]} 8ms\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[]} 1ms\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"../src\"]} 1ms\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"/src\"]} 0ms\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"src/**\"]} 0ms\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"src\\\\input\"]} 0ms\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"\"]} 0ms\n[stdout] \n[stdout]  Test Files  4 passed (4)\n[stdout]       Tests  82 passed (82)\n[stdout]    Start at  10:14:28\n[stdout]    Duration  3.76s (transform 1.10s, setup 55ms, import 1.44s, tests 3.34s, environment 0ms)\n[stdout] \n[system] closed with code 0 signal null"
+  },
+  {
+    "sessionId": "child_e848385a-6bbb-4922-8922-feaab5eba0b3",
+    "callId": "tool-call-66dd479bf285a6fb2111f318",
+    "tool": "terminal.run",
+    "input": {
+      "command": "node -e 'const fs=require(\"fs\"),crypto=require(\"crypto\"); const m=JSON.parse(fs.readFileSync(\"MANIFEST.json\",\"utf8\")); for(const [p,h] of Object.entries(m.updatedSourceHashes)){const actual=crypto.createHash(\"sha256\").update(fs.readFileSync(p)).digest(\"hex\");console.log((actual===h?\"MATCH\":\"MISMATCH\")+\" \"+p)} try{const DB=require(\"better-sqlite3\");const db=new DB(\":memory:\");console.log(\"SQLITE_READY \"+JSON.stringify(db.prepare(\"select sqlite_version() as version\").get()));db.close()}catch(e){console.log(\"SQLITE_UNAVAILABLE \"+e.message);process.exitCode=2}'",
+      "verificationInputs": [
+        "MANIFEST.json",
+        "src",
+        "node_modules"
+      ],
+      "verification": "source-and-sqlite-prerequisites",
+      "waitMs": 1000,
+      "timeoutMs": null
+    },
+    "ok": true,
+    "process": {
+      "verification": "source-and-sqlite-prerequisites",
+      "verificationInputs": [
+        "MANIFEST.json",
+        "src",
+        "node_modules"
+      ],
+      "id": "proc_njps5pl5",
+      "command": "node -e 'const fs=require(\"fs\"),crypto=require(\"crypto\"); const m=JSON.parse(fs.readFileSync(\"MANIFEST.json\",\"utf8\")); for(const [p,h] of Object.entries(m.updatedSourceHashes)){const actual=crypto.createHash(\"sha256\").update(fs.readFileSync(p)).digest(\"hex\");console.log((actual===h?\"MATCH\":\"MISMATCH\")+\" \"+p)} try{const DB=require(\"better-sqlite3\");const db=new DB(\":memory:\");console.log(\"SQLITE_READY \"+JSON.stringify(db.prepare(\"select sqlite_version() as version\").get()));db.close()}catch(e){console.log(\"SQLITE_UNAVAILABLE \"+e.message);process.exitCode=2}'",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "exited",
+      "startedAt": "2026-11-06T10:15:18.473Z",
+      "updatedAt": "2026-11-06T10:15:18.518Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    "running": false,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "3fc62da0865b2e7195aee0d0ffd49415e25288166d53859b144c3021dae334a0",
+    "contentTail": "started pid 99753\n\nMISMATCH src/process/managed-command.test.ts\n\nMISMATCH src/process/process-manager.ts\n\nMISMATCH src/runtime/recoverable-draft.test.ts\n\nMISMATCH src/runtime/recoverable-draft.ts\n\nMISMATCH src/tasks/agent-step-executor.test.ts\n\nMISMATCH src/tasks/agent-step-executor.ts\n\nMISMATCH src/tasks/task-scheduler.test.ts\n\nMISMATCH src/tasks/task-scheduler.ts\n\nMISMATCH src/tools/workspace-tools.ts\n\nSQLITE_READY {\"version\":\"3.53.1\"}\n\nclosed with code 0 signal null"
+  },
+  {
+    "sessionId": "child_fc049cf7-bc3a-4baf-a18b-f7a183b10fb3",
+    "callId": "tool-call-d36e48e60c7d2afae258bfef",
+    "tool": "terminal.run",
+    "input": {
+      "command": "cd upstream/superagent && git rev-parse HEAD && git status --short && node --version && test -x node_modules/.bin/vitest && node_modules/.bin/vitest run tests/policy.spec.ts tests/core-engine.spec.ts tests/delivery.spec.ts tests/background.spec.ts tests/followups.spec.ts --reporter=verbose",
+      "verificationInputs": [
+        "upstream/superagent"
+      ],
+      "verification": "superagent-targeted-tests",
+      "waitMs": 1000,
+      "timeoutMs": null
+    },
+    "ok": true,
+    "process": {
+      "verification": "superagent-targeted-tests",
+      "verificationInputs": [
+        "upstream/superagent"
+      ],
+      "id": "proc_e8p8e0ue",
+      "command": "cd upstream/superagent && git rev-parse HEAD && git status --short && node --version && test -x node_modules/.bin/vitest && node_modules/.bin/vitest run tests/policy.spec.ts tests/core-engine.spec.ts tests/delivery.spec.ts tests/background.spec.ts tests/followups.spec.ts --reporter=verbose",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "running",
+      "startedAt": "2026-11-06T10:10:38.538Z",
+      "updatedAt": "2026-11-06T10:10:38.538Z"
+    },
+    "running": true,
+    "code": null,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "420b4f9ee1dc41c1520d1a1f49311fdfbf835cbfaf2063a3df9da2c9863a079c",
+    "contentTail": "Command is still running as proc_e8p8e0ue. Use process.logs to wait for completion; process.stop cancels it. Do not restart the command.\n\nstarted pid 87377\n\n8d664f7bee049bc2ff2c39d9a5bcd8f6617a4148\n\n?? ../../UPSTREAM.json\n?? ../../node_modules\n?? ../\n\nv24.14.1\n\n RUN  v4.1.8 <BENCHMARK_ROOT>/after/comparison/workspace/upstream/superagent\n\n ✓ tests/delivery.spec.ts > delivers queue as an orchestrator relay, deduplicating pending and consumed messages 4ms\n\n ✓ tests/delivery.spec.ts > delivers steer as an orchestrator relay, deduplicating pending and consumed messages 1ms\n ✓ tests/delivery.spec.ts > recognizes legacy plugin identity in pending input without rewriting it 0ms\n ✓ tests/delivery.spec.ts > recognizes legacy plugin identity in consumed input without rewriting it 0ms\n ✓ tests/delivery.spec.ts > recognizes legacy plugin identity in live input without rewriting it 0ms\n ✓ tests/delivery.spec.ts > does not treat a legacy plugin source another-plugin as this producer 0ms\n ✓ tests/delivery.spec.ts > does not treat a legacy plugin source undefined as this producer 0ms\n ✓ tests/delivery.spec.ts > recognizes legacy user RPC identity in pending input 2ms\n ✓ tests/delivery.spec.ts > recognizes legacy user RPC identity in consumed input 0ms\n ✓ tests/delivery.spec.ts > retries a failed durability barrier without another delivery and permits concurrent retries 1ms\n ✓ tests/delivery.spec.ts > retries history failures and reads past the first page 4ms\n ✓ tests/delivery.spec.ts > keeps consumption that happens during the initial history read 1ms\n ✓ tests/delivery.spec.ts > does not dispatch when cancelled or disposed during history loading 1ms\n ✓ tests/delivery.spec.ts > injects a notice once, as dsh-superagent's notice with its summary, without waking the agent 1ms\n ✓ tests/delivery.spec.ts > tells whether the Session holds a message: one waiting in its inbox, one it took, and one in its stored history 1ms"
+  },
+  {
+    "sessionId": "child_fc049cf7-bc3a-4baf-a18b-f7a183b10fb3",
+    "callId": "tool-call-920be999e263712e5bb16130",
+    "tool": "process.logs",
+    "input": {
+      "id": "proc_e8p8e0ue",
+      "tailChars": 28000,
+      "waitMs": 1000
+    },
+    "ok": true,
+    "process": {
+      "verification": "superagent-targeted-tests",
+      "verificationInputs": [
+        "upstream/superagent"
+      ],
+      "id": "proc_e8p8e0ue",
+      "command": "cd upstream/superagent && git rev-parse HEAD && git status --short && node --version && test -x node_modules/.bin/vitest && node_modules/.bin/vitest run tests/policy.spec.ts tests/core-engine.spec.ts tests/delivery.spec.ts tests/background.spec.ts tests/followups.spec.ts --reporter=verbose",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "exited",
+      "startedAt": "2026-11-06T10:10:38.538Z",
+      "updatedAt": "2026-11-06T10:10:40.572Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    "contentSha256": "2b6872163cca0a683afbad1936ce11efcbf5a2df4743580277c29a6237372c56",
+    "contentTail": "heir ends woke 1ms\n[stdout]  ✓ tests/followups.spec.ts > delivers a follow-up to the worker and tells the main Session with a card, without an Eval 66ms\n[stdout]  ✓ tests/followups.spec.ts > sends a person's message that reaches no ticket, such as only one a person stopped, to Eval as before 47ms\n ✓ tests/followups.spec.ts > leaves a delivered follow-up to its ticket's worker: the main Session may stop the ticket on it, and route it only once handed back 80ms\n[stdout]  ✓ tests/followups.spec.ts > costs the main Session one model call for a burst of follow-ups while it works, and two while it idles 79ms\n[stdout]  ✓ tests/followups.spec.ts > keeps a follow-up's notice in the effect queue until the main Session takes it, and sends it once 35ms\n[stdout]  ✓ tests/followups.spec.ts > relays a message a worker handed back as a candidate with the worker's reason 45ms\n[stdout]  ✓ tests/followups.spec.ts > lets a worker follow a related thread for context, which the main Session hears of without waking, and notes a ticket 36ms\n ✓ tests/followups.spec.ts > takes the message a follow-up answers from its Source kind, whichever kind it is 13ms\n[stdout]  ✓ tests/followups.spec.ts > tells the main Session of a follow-up to an ended ticket once the ticket resumes, and not when it cannot 53ms\n[stdout]  ✓ tests/followups.spec.ts > tells the main Session nothing of a message it attached to an ended ticket, which resumes for it 34ms\n ✓ tests/followups.spec.ts > tells the main Session of a follow-up an earlier version queued for Eval, when the queue lets it go 41ms\n[stdout]  ✓ tests/followups.spec.ts > sends a request on a thread a worker follows only for context to Eval, and marks the worker's copy as context 29ms\n ✓ tests/followups.spec.ts > shows a candidate's message as its workers would read it, with the message it answers 49ms\n[stdout]  ✓ tests/followups.spec.ts > keeps a listed member's request on a ticket's thread to that ticket, so it is not done twice 36ms\n[stdout]  ✓ tests/followups.spec.ts > leaves a follow-up to its ticket's worker after the main Session drops the subscriptions of its thread 43ms\n ✓ tests/followups.spec.ts > tells a worker it may hand back a message beyond its ticket or for another one, also when the message resumed it 22ms\n[stdout] \n[stdout]  Test Files  5 passed (5)\n      Tests  477 passed (477)\n   Start at  10:10:39\n   Duration  1.32s (transform 1.22s, setup 0ms, import 1.72s, tests 851ms, environment 0ms)\n[system] closed with code 0 signal null"
+  },
+  {
+    "sessionId": "child_fc049cf7-bc3a-4baf-a18b-f7a183b10fb3",
+    "callId": "tool-call-42671fb388b215077a99167b",
+    "tool": "terminal.run",
+    "input": {
+      "command": "cd upstream/superagent && node --version && ../../node_modules/.bin/vitest run tests/policy.spec.ts tests/core-engine.spec.ts tests/delivery.spec.ts --reporter=verbose",
+      "verificationInputs": [
+        "upstream/superagent",
+        "node_modules"
+      ],
+      "verification": "superagent-selected-tests",
+      "waitMs": 1000,
+      "timeoutMs": null
+    },
+    "ok": true,
+    "process": {
+      "verification": "superagent-selected-tests",
+      "verificationInputs": [
+        "upstream/superagent",
+        "node_modules"
+      ],
+      "id": "proc_x3ov7n4u",
+      "command": "cd upstream/superagent && node --version && ../../node_modules/.bin/vitest run tests/policy.spec.ts tests/core-engine.spec.ts tests/delivery.spec.ts --reporter=verbose",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "running",
+      "startedAt": "2026-11-06T10:11:58.476Z",
+      "updatedAt": "2026-11-06T10:11:58.476Z"
+    },
+    "running": true,
+    "code": null,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "29c1eda3e2d8c6be0574ce7683d470fb95ce164558d18b7a9f86fc2104c6049b",
+    "contentTail": "Command is still running as proc_x3ov7n4u. Use process.logs to wait for completion; process.stop cancels it. Do not restart the command.\n\nstarted pid 97943\n\nv24.14.1\n\n RUN  v4.1.6 <BENCHMARK_ROOT>/after/comparison/workspace/upstream/superagent\n\n ✓ tests/delivery.spec.ts > delivers queue as an orchestrator relay, deduplicating pending and consumed messages 8ms\n\n ✓ tests/delivery.spec.ts > delivers steer as an orchestrator relay, deduplicating pending and consumed messages 3ms\n ✓ tests/delivery.spec.ts > recognizes legacy plugin identity in pending input without rewriting it 1ms\n ✓ tests/delivery.spec.ts > recognizes legacy plugin identity in consumed input without rewriting it 1ms\n\n ✓ tests/delivery.spec.ts > recognizes legacy plugin identity in live input without rewriting it 3ms\n\n ✓ tests/delivery.spec.ts > does not treat a legacy plugin source another-plugin as this producer 3ms\n\n ✓ tests/delivery.spec.ts > does not treat a legacy plugin source undefined as this producer 1ms\n\n ✓ tests/delivery.spec.ts > recognizes legacy user RPC identity in pending input 3ms\n\n ✓ tests/delivery.spec.ts > recognizes legacy user RPC identity in consumed input 1ms\n\n ✓ tests/delivery.spec.ts > retries a failed durability barrier without another delivery and permits concurrent retries 3ms\n\n ✓ tests/delivery.spec.ts > retries history failures and reads past the first page 12ms\n\n ✓ tests/delivery.spec.ts > keeps consumption that happens during the initial history read 0ms\n\n ✓ tests/delivery.spec.ts > does not dispatch when cancelled or disposed during history loading 4ms\n ✓ tests/delivery.spec.ts > injects a notice once, as dsh-superagent's notice with its summary, without waking the agent 2ms\n\n ✓ tests/delivery.spec.ts > tells whether the Session holds a message: one waiting in its inbox, one it took, and one in its stored history 3ms"
+  },
+  {
+    "sessionId": "child_fc049cf7-bc3a-4baf-a18b-f7a183b10fb3",
+    "callId": "tool-call-9caa48fe7b3406f17527f775",
+    "tool": "process.logs",
+    "input": {
+      "id": "proc_x3ov7n4u",
+      "tailChars": 24000,
+      "waitMs": 1000
+    },
+    "ok": true,
+    "process": {
+      "verification": "superagent-selected-tests",
+      "verificationInputs": [
+        "upstream/superagent",
+        "node_modules"
+      ],
+      "id": "proc_x3ov7n4u",
+      "command": "cd upstream/superagent && node --version && ../../node_modules/.bin/vitest run tests/policy.spec.ts tests/core-engine.spec.ts tests/delivery.spec.ts --reporter=verbose",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "exited",
+      "startedAt": "2026-11-06T10:11:58.476Z",
+      "updatedAt": "2026-11-06T10:12:00.454Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    "contentSha256": "43e1d91c9376cc7c6943736f5772d22772b0649006fec36b3a6c066f06755869",
+    "contentTail": "ages that do not address the agent, in the settings and in a submitted Policy 1ms\n[stdout]  ✓ tests/policy.spec.ts > admission table settings > accepts an explicit candidate whatever the accept mode, which bears only on inferred ones 0ms\n[stdout]  ✓ tests/policy.spec.ts > admission table settings > admits a listed bot that mentions the agent where the Source does not observe its messages, as a listed person's mention needs none 0ms\n[stdout]  ✓ tests/policy.spec.ts > rule judgements > refuses an assessment that judges one enabled rule twice and leaves another unjudged 0ms\n[stdout]  ✓ tests/policy.spec.ts > policy effects > tells a ticket how a change bears on it, and leaves the others alone 0ms\n[stdout]  ✓ tests/policy.spec.ts > policy effects > tells an inferred ticket that inferred work is no longer accepted when the accept mode leaves auto, and names a bot it is for 0ms\n ✓ tests/policy.spec.ts > policy effects > keeps an inferred follow-up's Mandate only while candidates become work and its rules are on, as any inferred one 0ms\n[stdout]  ✓ tests/policy.spec.ts > policy effects > revokes an inferred ticket whose cell weakens or whose candidates no longer become work, and reports a deleted rule disabled 0ms\n[stdout]  ✓ tests/policy.spec.ts > bots and events without a sender > admits a bot on its Source's list as an inferred candidate where the Source observes its scope, and no other bot 1ms\n[stdout]  ✓ tests/policy.spec.ts > bots and events without a sender > keeps a bot candidate's Mandate while the bot stays on its list and candidates may become work 1ms\n[stdout]  ✓ tests/policy.spec.ts > bots and events without a sender > admits the default branch's CI through its row once observed and set, and never a PR's CI 0ms\n ✓ tests/policy.spec.ts > bots and events without a sender > admits a Feishu bot on its list in a chat the Source observes 0ms\n[stdout]  ✓ tests/policy.spec.ts > bots and events without a sender > says on the GitHub bot list when a listed bot's comment is received: when it mentions the agent, or comments are observed 0ms\n[stdout]  ✓ tests/policy.spec.ts > bots and events without a sender > names a GitHub Trigger's receiving scope, which the Source observes where its switch is on 1ms\n[stdout] \n[stdout]  Test Files  3 passed (3)\n[stdout]       Tests  456 passed (456)\n[stdout]    Start at  10:11:58\n[stdout]    Duration  1.45s (transform 1.29s, setup 0ms, import 1.90s, tests 425ms, environment 0ms)\n[stdout] \n[system] closed with code 0 signal null"
+  },
+  {
+    "sessionId": "child_5776abd4-5e80-4a34-8d64-e3ebb08e46cb",
+    "callId": "tool-call-2321e185b66cddbbdaf61b78",
+    "tool": "terminal.run",
+    "input": {
+      "command": "cd upstream/harness && node --version && node_modules/.bin/vitest run packages/core/agent-loop/tests/cancel.spec.ts packages/sandbox/sandbox-policy/tests/policy.spec.ts packages/llm/llm-retry/tests/transport-recovery.spec.ts packages/session/session-persistence-jsonl/tests/migration-refusal.spec.ts --maxWorkers=1",
+      "verificationInputs": [
+        "upstream/harness"
+      ],
+      "verification": "targeted-runtime-tests",
+      "waitMs": 1000,
+      "timeoutMs": null
+    },
+    "ok": true,
+    "process": {
+      "verification": "targeted-runtime-tests",
+      "verificationInputs": [
+        "upstream/harness"
+      ],
+      "id": "proc_w9wgn00b",
+      "command": "cd upstream/harness && node --version && node_modules/.bin/vitest run packages/core/agent-loop/tests/cancel.spec.ts packages/sandbox/sandbox-policy/tests/policy.spec.ts packages/llm/llm-retry/tests/transport-recovery.spec.ts packages/session/session-persistence-jsonl/tests/migration-refusal.spec.ts --maxWorkers=1",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "running",
+      "startedAt": "2026-11-06T10:10:55.740Z",
+      "updatedAt": "2026-11-06T10:10:55.740Z"
+    },
+    "running": true,
+    "code": null,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "c9670e7f25e5097beb90e56918db401492a496a35d598786480b9cadedc7461b",
+    "contentTail": "Command is still running as proc_w9wgn00b. Use process.logs to wait for completion; process.stop cancels it. Do not restart the command.\n\nstarted pid 87884\n\nv24.14.1\n\nstderr: The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n\nstderr: The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\nThe plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n\n RUN  v4.1.11 <BENCHMARK_ROOT>/after/comparison/workspace/upstream/harness"
+  },
+  {
+    "sessionId": "child_5776abd4-5e80-4a34-8d64-e3ebb08e46cb",
+    "callId": "tool-call-e3fe9acaa4afc0178f2e470e",
+    "tool": "process.logs",
+    "input": {
+      "id": "proc_w9wgn00b",
+      "tailChars": 12000,
+      "waitMs": 1000
+    },
+    "ok": true,
+    "process": {
+      "verification": "targeted-runtime-tests",
+      "verificationInputs": [
+        "upstream/harness"
+      ],
+      "id": "proc_w9wgn00b",
+      "command": "cd upstream/harness && node --version && node_modules/.bin/vitest run packages/core/agent-loop/tests/cancel.spec.ts packages/sandbox/sandbox-policy/tests/policy.spec.ts packages/llm/llm-retry/tests/transport-recovery.spec.ts packages/session/session-persistence-jsonl/tests/migration-refusal.spec.ts --maxWorkers=1",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "running",
+      "startedAt": "2026-11-06T10:10:55.740Z",
+      "updatedAt": "2026-11-06T10:10:55.740Z"
+    },
+    "contentSha256": "f186c799d8c7b32c3bfdb8f6499b6dafdcbe84299d2c1852c75baba94602ac63",
+    "contentTail": "Process proc_w9wgn00b: running.\n[system] started pid 87884\n[stdout] v24.14.1\n[stderr] The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n[stderr] The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\nThe plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n[stdout] \n[stdout]  RUN  v4.1.11 <BENCHMARK_ROOT>/after/comparison/workspace/upstream/harness\n[stdout]  ✓ |thread-safe| packages/core/agent-loop/tests/cancel.spec.ts (44 tests) 953ms"
+  },
+  {
+    "sessionId": "child_5776abd4-5e80-4a34-8d64-e3ebb08e46cb",
+    "callId": "tool-call-ca126e5dfc93c44f4bed9f07",
+    "tool": "process.logs",
+    "input": {
+      "id": "proc_w9wgn00b",
+      "tailChars": 16000,
+      "waitMs": 1000
+    },
+    "ok": true,
+    "process": {
+      "verification": "targeted-runtime-tests",
+      "verificationInputs": [
+        "upstream/harness"
+      ],
+      "id": "proc_w9wgn00b",
+      "command": "cd upstream/harness && node --version && node_modules/.bin/vitest run packages/core/agent-loop/tests/cancel.spec.ts packages/sandbox/sandbox-policy/tests/policy.spec.ts packages/llm/llm-retry/tests/transport-recovery.spec.ts packages/session/session-persistence-jsonl/tests/migration-refusal.spec.ts --maxWorkers=1",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "running",
+      "startedAt": "2026-11-06T10:10:55.740Z",
+      "updatedAt": "2026-11-06T10:10:55.740Z"
+    },
+    "contentSha256": "f186c799d8c7b32c3bfdb8f6499b6dafdcbe84299d2c1852c75baba94602ac63",
+    "contentTail": "Process proc_w9wgn00b: running.\n[system] started pid 87884\n[stdout] v24.14.1\n[stderr] The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n[stderr] The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\nThe plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n[stdout] \n[stdout]  RUN  v4.1.11 <BENCHMARK_ROOT>/after/comparison/workspace/upstream/harness\n[stdout]  ✓ |thread-safe| packages/core/agent-loop/tests/cancel.spec.ts (44 tests) 953ms"
+  },
+  {
+    "sessionId": "child_5776abd4-5e80-4a34-8d64-e3ebb08e46cb",
+    "callId": "tool-call-ed2bd161d7dceae290c4877f",
+    "tool": "process.logs",
+    "input": {
+      "id": "proc_w9wgn00b",
+      "tailChars": 15000,
+      "waitMs": 1000
+    },
+    "ok": true,
+    "process": {
+      "verification": "targeted-runtime-tests",
+      "verificationInputs": [
+        "upstream/harness"
+      ],
+      "id": "proc_w9wgn00b",
+      "command": "cd upstream/harness && node --version && node_modules/.bin/vitest run packages/core/agent-loop/tests/cancel.spec.ts packages/sandbox/sandbox-policy/tests/policy.spec.ts packages/llm/llm-retry/tests/transport-recovery.spec.ts packages/session/session-persistence-jsonl/tests/migration-refusal.spec.ts --maxWorkers=1",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "running",
+      "startedAt": "2026-11-06T10:10:55.740Z",
+      "updatedAt": "2026-11-06T10:10:55.740Z"
+    },
+    "contentSha256": "8ff9f2efadb20c354b0cb2e770a1b110b51e29ee970ded693785116358f47385",
+    "contentTail": "Process proc_w9wgn00b: running.\n[system] started pid 87884\n[stdout] v24.14.1\n[stderr] The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n[stderr] The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\nThe plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n[stdout] \n[stdout]  RUN  v4.1.11 <BENCHMARK_ROOT>/after/comparison/workspace/upstream/harness\n[stdout]  ✓ |thread-safe| packages/core/agent-loop/tests/cancel.spec.ts (44 tests) 953ms\n[stdout]  ✓ |thread-safe| packages/session/session-persistence-jsonl/tests/migration-refusal.spec.ts (136 tests) 7802ms\n     ✓ retains a V3 watermark claiming V5 unchanged through native reopening  655ms\n     ✓ preserves 'result'-owned 'extension' through migration and native reopening  307ms\n     ✓ preserves 'result'-owned '__proto__' through migration and native reopening  361ms\n     ✓ preserves 'result'-owned 'constructor' through migration and native reopening  308ms\n     ✓ preserves 'message'-owned 'isError' through migration and native reopening  303ms"
+  },
+  {
+    "sessionId": "child_5776abd4-5e80-4a34-8d64-e3ebb08e46cb",
+    "callId": "tool-call-06062922f6af55c3fe39e16c",
+    "tool": "process.logs",
+    "input": {
+      "id": "proc_w9wgn00b",
+      "tailChars": 16000,
+      "waitMs": 1000
+    },
+    "ok": true,
+    "process": {
+      "verification": "targeted-runtime-tests",
+      "verificationInputs": [
+        "upstream/harness"
+      ],
+      "id": "proc_w9wgn00b",
+      "command": "cd upstream/harness && node --version && node_modules/.bin/vitest run packages/core/agent-loop/tests/cancel.spec.ts packages/sandbox/sandbox-policy/tests/policy.spec.ts packages/llm/llm-retry/tests/transport-recovery.spec.ts packages/session/session-persistence-jsonl/tests/migration-refusal.spec.ts --maxWorkers=1",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "exited",
+      "startedAt": "2026-11-06T10:10:55.740Z",
+      "updatedAt": "2026-11-06T10:11:10.495Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    "contentSha256": "5588082ebd275764f63978600c7f9ffb4f7e2eade365fc2f0b280294b052653f",
+    "contentTail": "Process proc_w9wgn00b: exited, exit code 0.\n[system] started pid 87884\n[stdout] v24.14.1\n[stderr] The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n[stderr] The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\nThe plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n[stdout] \n[stdout]  RUN  v4.1.11 <BENCHMARK_ROOT>/after/comparison/workspace/upstream/harness\n[stdout]  ✓ |thread-safe| packages/core/agent-loop/tests/cancel.spec.ts (44 tests) 953ms\n[stdout]  ✓ |thread-safe| packages/session/session-persistence-jsonl/tests/migration-refusal.spec.ts (136 tests) 7802ms\n     ✓ retains a V3 watermark claiming V5 unchanged through native reopening  655ms\n     ✓ preserves 'result'-owned 'extension' through migration and native reopening  307ms\n     ✓ preserves 'result'-owned '__proto__' through migration and native reopening  361ms\n     ✓ preserves 'result'-owned 'constructor' through migration and native reopening  308ms\n     ✓ preserves 'message'-owned 'isError' through migration and native reopening  303ms\n[stdout]  ✓ |thread-safe| packages/llm/llm-retry/tests/transport-recovery.spec.ts (8 tests) 2395ms\n[stdout]      ✓ turns a stalled body into TIMEOUT and succeeds on the next request  1029ms\n     ✓ turns a body that never observes the abort into TIMEOUT and succeeds on the next request  1023ms\n[stdout]  ✓ |thread-safe| packages/sandbox/sandbox-policy/tests/policy.spec.ts (24 tests) 44ms\n[stdout] \n[stdout]  Test Files  4 passed (4)\n      Tests  212 passed (212)\n[stdout]    Start at  10:10:56\n[stdout]    Duration  14.06s (transform 1.81s, setup 95ms, import 2.39s, tests 11.19s, environment 0ms)\n[stdout] \n[system] closed with code 0 signal null"
+  }
+]

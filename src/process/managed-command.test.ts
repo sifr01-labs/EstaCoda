@@ -42,6 +42,38 @@ describe("managed terminal continuation", () => {
     } finally { await f.close(); }
   });
 
+  it("uses a short observation wait without imposing a kill deadline", async () => {
+    const f = await fixture();
+    try {
+      const result = await f.terminal.run({ command: "printf started >> starts.txt; sleep 0.3; printf done > done.txt", waitMs: 1 });
+      expect(result).toMatchObject({ ok: true, metadata: { running: true, timedOut: false } });
+      const id = (result.metadata?.process as { id: string }).id;
+      const logs = createProcessTools({ processManager: f.manager }).find(tool => tool.name === "process.logs")!;
+      expect(await logs.run({ id })).toMatchObject({ metadata: { process: { status: "exited", exitCode: 0 } } });
+      expect(await readFile(join(f.root, "starts.txt"), "utf8")).toBe("started");
+      expect(await readFile(join(f.root, "done.txt"), "utf8")).toBe("done");
+    } finally { await f.close(); }
+  });
+
+  it("rejects ambiguous wait/deadline inputs before dispatch", async () => {
+    const f = await fixture();
+    try {
+      expect(await f.terminal.run({ command: "printf bad > bad.txt", waitMs: 1, timeoutMs: 100 })).toMatchObject({ ok: false });
+      expect(f.manager.list()).toEqual([]);
+      await expect(access(join(f.root, "bad.txt"))).rejects.toThrow();
+    } finally { await f.close(); }
+  });
+
+  it("rejects invalid waits before starting any command", async () => {
+    const f = await fixture();
+    try {
+      for (const waitMs of [-1, 101, NaN, Infinity, "1"]) {
+        expect(await f.terminal.run({ command: "printf bad > bad.txt", waitMs })).toMatchObject({ ok: false });
+      }
+      expect(f.manager.list()).toEqual([]);
+    } finally { await f.close(); }
+  });
+
   it("collects short command output and exit status, with stdin closed", async () => {
     const f = await fixture();
     try {
@@ -54,12 +86,14 @@ describe("managed terminal continuation", () => {
     } finally { await f.close(); }
   });
 
-  it("retains explicit hard deadlines without handing the command to the manager", async () => {
+  it("retains explicit hard deadlines and the stopped process receipt", async () => {
     const f = await fixture();
     try {
-      const result = await f.terminal.run({ command: "sleep 30; printf late > late.txt", timeoutMs: 100 });
+      const result = await f.terminal.run({ command: "printf started > started.txt; sleep 30; printf late > late.txt", timeoutMs: 100 });
       expect(result).toMatchObject({ ok: false, metadata: { timedOut: true, timeoutMs: 100 } });
-      expect(f.manager.list()).toEqual([]);
+      expect(f.manager.list()).toMatchObject([{ status: "stopped", timedOut: true, timeoutMs: 100 }]);
+      expect(f.terminal.isFailureOutcomeKnown?.(result)).toBe(false);
+      expect(await readFile(join(f.root, "started.txt"), "utf8")).toBe("started");
       await expect(access(join(f.root, "late.txt"))).rejects.toThrow();
     } finally { await f.close(); }
   });

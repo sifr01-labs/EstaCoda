@@ -439,14 +439,14 @@ describe("AgentStepExecutor", () => {
         diagnostic: false
       },
       {
-        name: "missing-repository-discovery",
+        name: "known-path-does-not-require-discovery",
         research: { scope: "repository", requireLiveSources: false, requireRepositoryEvidence: true },
         text: "Repository finding in src/runtime/agent.ts:12.",
         executions: [successfulEvidenceExecution("file.read", "read-only-local", ["files", "research"], {
           path: "src/runtime/agent.ts"
         }, "# src/runtime/agent.ts\nexport class Agent {}", { path: "src/runtime/agent.ts" })],
-        outcome: "failed",
-        diagnostic: true
+        outcome: "succeeded",
+        diagnostic: false
       },
       {
         name: "accepted-repository-evidence",
@@ -893,7 +893,8 @@ describe("AgentStepExecutor", () => {
     expect(settled.outcome).toBe(["recovered", "settled"].includes(mode) ? "succeeded" : "failed");
     if (mode === "uncertain") expect(settled).toMatchObject({ failure: { uncertainSideEffects: true } });
     if (mode === "denied") expect(settled).toMatchObject({ failure: { class: "security-deny" }, diagnosticResults: [{ content: text }] });
-    if (["uncertain", "unknown", "privileged"].includes(mode)) expect(settled).not.toHaveProperty("diagnosticResults");
+    if (mode === "uncertain") expect(settled).toMatchObject({ diagnosticResults: [{ content: expect.stringContaining("local execution effects remain uncertain") }] });
+    if (["unknown", "privileged"].includes(mode)) expect(settled).not.toHaveProperty("diagnosticResults");
   });
 
   it.each(["success", "tampered", "denied"])("exports accepted report bytes through governed tools without a model: %s", async mode => {

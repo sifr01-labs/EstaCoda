@@ -1,0 +1,36 @@
+[
+  {
+    "sessionId": "child_ec228d39-de47-432f-9d8e-7b084c9e613c",
+    "callId": "tool-call-935927882052d8171c0474e1",
+    "tool": "terminal.run",
+    "input": {
+      "command": "./node_modules/.bin/vitest run --config vitest.node.config.ts src/runtime/command-completion-checks.test.ts src/utils/task-result-summary.test.ts",
+      "verificationInputs": [
+        "."
+      ],
+      "verification": "command-completion-and-summary-tests",
+      "timeoutMs": null
+    },
+    "ok": true,
+    "process": {
+      "verification": "command-completion-and-summary-tests",
+      "verificationInputs": [
+        "."
+      ],
+      "id": "proc_gjj9plx1",
+      "command": "./node_modules/.bin/vitest run --config vitest.node.config.ts src/runtime/command-completion-checks.test.ts src/utils/task-result-summary.test.ts",
+      "cwd": "<BENCHMARK_ROOT>/before/continuation/workspace",
+      "status": "exited",
+      "startedAt": "2026-11-06T10:19:57.880Z",
+      "updatedAt": "2026-11-06T10:20:01.782Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    "running": false,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "f0f257257d42b14f613686b379e5d04dafc30157ba0803eb26de5936a89de45b",
+    "contentTail": "\n\n ✓ src/runtime/command-completion-checks.test.ts > credits full readback of terminal.run output once 10ms\n ✓ src/runtime/command-completion-checks.test.ts > credits full readback of execute_code output once 19ms\n ✓ src/runtime/command-completion-checks.test.ts > finishes nine outputs only after a current check covers the full request 98ms\n\n ✓ src/runtime/command-completion-checks.test.ts > retains an observed file predicate across unrelated writes without narrowing generic checks 19ms\n\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > revalidates a scoped managed process after editing REPORT.md 325ms\n\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > revalidates a scoped managed process after editing src/input.txt 322ms\n\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > preserves three source checks across a report patch, then invalidates an affected source check 26ms\n\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > keeps unknown or whole-workspace dependencies conservative: {} 8ms\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > keeps unknown or whole-workspace dependencies conservative: {\"verificationInputs\":[\".\"]} 9ms\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[]} 1ms\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"../src\"]} 0ms\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"/src\"]} 0ms\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"src/**\"]} 0ms\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"src\\\\input\"]} 0ms\n ✓ src/runtime/command-completion-checks.test.ts > verification input scopes > rejects an unsafe or ambiguous scope before running: {\"verificationInputs\":[\"\"]} 0ms\n\n Test Files  2 passed (2)\n\n      Tests  51 passed (51)\n   Start at  10:19:58\n\n   Duration  3.69s (transform 355ms, setup 31ms, import 411ms, tests 3.23s, environment 0ms)\n\nclosed with code 0 signal null"
+  }
+]

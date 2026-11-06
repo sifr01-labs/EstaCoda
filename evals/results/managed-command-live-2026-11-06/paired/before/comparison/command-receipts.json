@@ -1,0 +1,446 @@
+[
+  {
+    "sessionId": "child_ad7567b0-2802-4335-9793-d42e12609878",
+    "callId": "tool-call-6887256ff31336246689ddd9",
+    "tool": "terminal.run",
+    "input": {
+      "command": "pwd; git rev-parse HEAD; git status --short; ls -a; cat AGENTS.md; cat UPSTREAM.json; cat package.json; cat vitest.config.ts",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": false,
+    "code": 1,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "6f0af616dac9c2e05756cdedf9958bcfd5ddbb4c757a907f7d9ac326ea70165d",
+    "contentTail": "3 -m unittest benchmarks.terminal_bench.harbor_agent_test\",\n    \"audit:esm\": \"node scripts/audit-esm.mjs dist\",\n    \"audit:runtime-imports\": \"node scripts/audit-runtime-imports.mjs\",\n    \"test\": \"vitest run --config vitest.node.config.ts\",\n    \"test:node\": \"vitest run --config vitest.node.config.ts\",\n    \"test:bun\": \"bun ./node_modules/vitest/vitest.mjs run\",\n    \"alpha:harness\": \"node --import tsx scripts/internal-alpha.ts\",\n    \"alpha:harness:bun\": \"bun scripts/internal-alpha.ts\",\n    \"eval:substrate\": \"node --import tsx scripts/eval-substrate.ts\",\n    \"eval:substrate:bun\": \"bun scripts/eval-substrate.ts\",\n    \"validate:research-reliability\": \"node --import tsx scripts/validate-research-reliability.ts\",\n    \"eval:fixtures\": \"node --import tsx scripts/run-eval-fixtures.ts\",\n    \"eval:vision:fixtures\": \"node --import tsx scripts/generate-vision-evaluation-fixtures.ts\",\n    \"eval:jev\": \"node --import tsx scripts/run-jev-calibration.ts\",\n    \"eval:vision:live\": \"node --import tsx scripts/run-vision-live-evaluation.ts\",\n    \"provider:hardening\": \"node --import tsx scripts/provider-hardening.ts\",\n    \"provider:hardening:bun\": \"bun scripts/provider-hardening.ts\",\n    \"desktop:dev\": \"pnpm --filter @estacoda/desktop dev\",\n    \"desktop:dev:smoke\": \"node --import tsx apps/desktop/tests/native-development.mts\",\n    \"desktop:typecheck\": \"pnpm --filter @estacoda/desktop typecheck\",\n    \"desktop:test\": \"pnpm --filter @estacoda/desktop test\",\n    \"desktop:package\": \"pnpm --filter @estacoda/desktop package\",\n    \"desktop:e2e\": \"pnpm --filter @estacoda/desktop e2e\",\n    \"desktop:native:execution\": \"node --import tsx apps/desktop/tests/native-real-execution.mts\",\n    \"desktop:native\": \"pnpm --filter @estacoda/desktop exec vite build --config tests/vite.harness.config.ts && node --import tsx apps/desktop/tests/native-integration.mts && node apps/desktop/tests/recovery-smoke.mjs && node apps/desktop/tests/package-check.mjs\",\n    \"desktop:native:docker\": \"node --import tsx apps/desktop/tests/native-docker-terminal.mts\",\n    \"desktop:research-release\": \"node --import tsx apps/desktop/tests/research-packaged.mts\"\n  },\n  \"devDependencies\": {\n    \"@types/better-sqlite3\": \"^7.6.13\",\n    \"@types/node\": \"^25.6.0\",\n    \"tsx\": \"^4.20.6\",\n    \"typescript\": \"^5.8.0\",\n    \"vitest\": \"^4.1.5\"\n  },\n  \"dependencies\": {\n    \"better-sqlite3\": \"^12.10.0\",\n    \"bidi-js\": \"^1.0.3\",\n    \"discord.js\": \"^14.27.0\",\n    \"sharp\": \"^0.35.3\"\n  }\n}\n\nstderr:\ncat: vitest.config.ts: No such file or directory"
+  },
+  {
+    "sessionId": "child_ad7567b0-2802-4335-9793-d42e12609878",
+    "callId": "tool-call-f7c19221c416685fbe33b0bf",
+    "tool": "terminal.run",
+    "input": {
+      "command": "cat vitest.node.config.ts; head -60 MANIFEST.json; git show --no-patch --oneline 62246ec5afb60cde7d1a9cb4d57b0bcfb421f1b2; find src/tasks src/runtime src/process src/tools src/security src/skills src/memory src/channels src/mcp -maxdepth 2 -type f | sort",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": true,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "ccd19c26488651dcae7617bf3b24b3b1e7f120c7d3a6008c3b77c8f2f195cba6",
+    "contentTail": "\nsrc/security/approval-file.ts\nsrc/security/approval-scope.test.ts\nsrc/security/approval-scope.ts\nsrc/security/command-data.test.ts\nsrc/security/command-data.ts\nsrc/security/command-safety.test.ts\nsrc/security/command-safety.ts\nsrc/security/data-egress-policy.test.ts\nsrc/security/data-egress-policy.ts\nsrc/security/dispatch-authorization.test.ts\nsrc/security/dispatch-authorization.ts\nsrc/security/ephemeral-secret-broker.test.ts\nsrc/security/ephemeral-secret-broker.ts\nsrc/security/exact-action-key.ts\nsrc/security/execution-action-identity.test.ts\nsrc/security/execution-action-identity.ts\nsrc/security/pending-action-approval.test.ts\nsrc/security/pending-action-approval.ts\nsrc/security/plaintext-credential-guard.test.ts\nsrc/security/plaintext-credential-guard.ts\nsrc/security/process-env.test.ts\nsrc/security/process-env.ts\nsrc/security/protected-argument-path.test.ts\nsrc/security/protected-argument-path.ts\nsrc/security/protected-browser-value-source.test.ts\nsrc/security/protected-browser-value-source.ts\nsrc/security/protected-tool-argument-transport.ts\nsrc/security/registered-secret-store.test.ts\nsrc/security/registered-secret-store.ts\nsrc/security/secure-input-destination-verifier.ts\nsrc/security/secure-input-policy.test.ts\nsrc/security/secure-input-policy.ts\nsrc/security/secure-input-transport-registry.test.ts\nsrc/security/secure-input-transport-registry.ts\nsrc/security/security-policy-factory.test.ts\nsrc/security/security-policy-factory.ts\nsrc/security/security-setup.test.ts\nsrc/security/smart-approval-assessor.test.ts\nsrc/security/smart-approval-assessor.ts\nsrc/security/workspace-approval-controller.test.ts\nsrc/security/workspace-approval-controller.ts\nsrc/security/workspace-trust-store.test.ts\nsrc/security/workspace-trust-store.ts\nsrc/skills/catalog-builder.test.ts\nsrc/skills/catalog-builder.ts\nsrc/skills/change-manifest-store.test.ts\nsrc/skills/change-manifest-store.ts\nsrc/skills/learning-diagnostics.test.ts\nsrc/skills/learning-diagnostics.ts\nsrc/skills/skill-bundled-sync.ts\nsrc/skills/skill-catalog-delta.ts\nsrc/skills/skill-contract.test.ts\nsrc/skills/skill-contract.ts\nsrc/skills/skill-curator-status.ts\nsrc/skills/skill-draft.test.ts\nsrc/skills/skill-draft.ts\nsrc/skills/skill-evolution.test.ts\nsrc/skills/skill-evolution.ts\nsrc/skills/skill-learning.test.ts\nsrc/skills/skill-learning.ts\nsrc/skills/skill-lifecycle.test.ts\nsrc/skills/skill-lifecycle.ts\nsrc/skills/skill-limits.ts\nsrc/skills/skill-loader.test.ts\nsrc/skills/skill-loader.ts\nsrc/skills/skill-muta"
+  },
+  {
+    "sessionId": "child_ad7567b0-2802-4335-9793-d42e12609878",
+    "callId": "tool-call-68254815329a83971a6e83b3",
+    "tool": "terminal.run",
+    "input": {
+      "command": "wc -l src/tasks/task-scheduler.ts src/tasks/agent-step-executor.ts src/runtime/recoverable-draft.ts src/process/process-manager.ts src/tools/workspace-tools.ts; grep -nE '(^export|^  (async |private |public )|recover|lease|checkpoint|verification|approval)' src/tasks/task-scheduler.ts | head -100; cat src/test/vitest-setup.ts; node --version; node node_modules/vitest/vitest.mjs --version; ls src/tasks/*test.ts src/process/*test.ts src/tools/*verification* src/tools/*policy*",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": false,
+    "code": 1,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "dcb6f7d00aed7f897365bd4cda2c1196b67e2cbb88f94a778a6cfced80db92cf",
+    "contentTail": "ing_for_approval\";\n692:          store.appendEvent(this.#event(currentTask, \"approval-resolved\", now, {\n696:            data: { approvalId: link.id, resolution: \"approved\" }\n700:              data: { from: currentTask.status, to: nextStatus, reasonCode: \"approval-granted\" }\n706:          link.status === \"denied\" ? \"approval-denied\" : \"approval-expired\",\n707:          link.status === \"denied\" ? \"The requested Task operation was denied.\" : \"The requested Task approval expired.\",\n721:        store.appendEvent(this.#event(currentTask, \"approval-resolved\", now, {\n725:          data: { approvalId: link.id, resolution: link.status }\n736:          data: { from: \"waiting_for_approval\", to: \"failed\", reasonCode: failureRecord.class }\n753:  #approvalWaitReason(store: TaskStore, task: Task, now: string): Task[\"waitReason\"] | undefined {\n756:      .filter((step) => step.status === \"waiting_for_approval\");\n759:      .filter((attempt) => attempt.status === \"waiting_for_approval\")\n761:    const approvalLinks = store.listApprovalLinks({ taskId: task.id, limit: 1_000 })\n763:    const requestedAt = approvalLinks.reduce<string | undefined>((earliest, link) =>\n765:    if (waitingSteps.length === 1 && approvalLinks.length === 1) {\n767:        kind: \"approval\",\n768:        summary: `Approval required for ${approvalLinks[0]!.toolName}.`,\n770:        approvalId: approvalLinks[0]!.id\n774:      kind: \"approval\",\n775:      summary: `${waitingSteps.length} Task approvals are pending.`,\n793:          \"waiting_for_approval\"\n806:          ((attempt.status === \"waiting_for_input\" || attempt.status === \"waiting_for_approval\") && attempt.lease === undefined)) {\n826:        const lease = attempt.lease;\n827:        if (!LEASE_OWNED_ATTEMPT_STATUSES.includes(attempt.status) && lease === undefined && !isTerminalTaskStatus(task.status)) {\n830:        const leaseExpired = lease !== undefined && Date.parse(lease.expiresAt) <= now.getTime();\n831:        if (lease !== undefined && !leaseExpired) continue;\n833:        const recovered = this.#recoverAbandonedAttempt(task.id, attempt.id, now);\n834:        if (!recovered) continue;\n835:        const heartbeatFailure = this.#leaseFailures.get(attempt.id);\n836:        this.#leaseFailures.delete(attempt.id);\nimport { installIsolatedStateHome } from \"./state-home.js\";\n\nprocess.env.ESTACODA_TEST_ORIGINAL_HOME ??= process.env.HOME;\ninstallIsolatedStateHome();\nv24.14.1\nvitest/4.1.6 darwin-arm64 node-v24.14.1\n\nstderr:\nzsh:1: no matches found: src/tools/*policy*"
+  },
+  {
+    "sessionId": "child_ad7567b0-2802-4335-9793-d42e12609878",
+    "callId": "tool-call-35426f600222217f70c3b939",
+    "tool": "terminal.run",
+    "input": {
+      "command": "find src/tasks src/process src/tools -maxdepth 1 -name '*test.ts' | sort; nl -ba src/runtime/recoverable-draft.ts; nl -ba src/process/process-manager.ts | sed -n '1,250p'; grep -nE 'it\\(|test\\(' src/tasks/task-scheduler.test.ts src/tasks/agent-step-executor.test.ts src/runtime/recoverable-draft.test.ts src/process/managed-command.test.ts | head -100",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": true,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "364b50757705c02b2e6339c169b47a3890bee07d0d915043707c35a3b818eed8",
+    "contentTail": "essRecord | undefined {\n   166\t    const record = this.#processes.get(id);\n   167\t    if (record === undefined || !this.canStartProtectedEnvironment(id, variableName)) return undefined;\n   168\t    const decoded = new TextDecoder(\"utf-8\", { fatal: true }).decode(value);\n   169\t    record.sensitiveOutput = true;\n   170\t    record.logs.length = 0;\n   171\t    record.status = \"running\";\n   172\t    record.updatedAt = this.#now().toISOString();\n   173\t    this.#spawn(record, { [variableName]: decoded });\n   174\t    return toRecord(record);\n   175\t  }\n   176\t\n   177\t  hasObservedPrompt(id: string, promptLabel: string): boolean {\n   178\t    const record = this.#processes.get(id);\n   179\t    if (record?.status !== \"running\" || record.child?.stdin.destroyed === true) return false;\n   180\t    const label = promptLabel.trim();\n   181\t    const observedOutput = record.logs\n   182\t      .filter((entry) => entry.stream === \"stdout\" || entry.stream === \"stderr\")\n   183\t      .map((entry) => entry.text)\n   184\t      .join(\"\")\n   185\t      .slice(-12_000);\n   186\t    return label.length > 0 && label.length <= 200 && observedOutput.includes(label);\n   187\t  }\n   188\t\n   189\t  writeProtectedInput(id: string, promptLabel: string, value: Uint8Array): boolean {\n   190\t    const record = this.#processes.get(id);\n   191\t    if (record === undefined || !this.hasObservedPrompt(id, promptLabel) || record.child === undefined) return false;\n   192\t    record.sensitiveOutput = true;\n   193\t    record.logs.length = 0;\n   194\t    record.child.stdin.write(value);\n   195\t    record.child.stdin.write(\"\\n\");\n   196\t    return true;\n   197\t  }\n   198\t\n   199\t  releasePrepared(id: string): void {\n   200\t    const record = this.#processes.get(id);\n   201\t    if (record?.status === \"prepared\") this.#processes.delete(id);\n   202\t  }\n   203\t\n   204\t  async #createRecord(\n   205\t    command: string,\n   206\t    status: \"prepared\" | \"running\",\n   207\t    protectedEnvironmentVariable?: string\n   208\t  ): Promise<InternalManagedProcess> {\n   209\t    if (this.#disposed) throw new Error(\"Process manager has been disposed.\");\n   210\t    await this.#lease?.content.assertMaterialized();\n   211\t    const cwd = this.#lease === undefined ? await realpath(this.#workspaceRoot) : await this.#lease.files.realpath(this.#workspaceRoot);\n   212\t    if (this.#disposed) throw new Error(\"Process manager has been disposed.\");\n   213\t    if (this.#processes.size >= 128) {\n   214\t      for (const [id, record] of this.#proces"
+  },
+  {
+    "sessionId": "child_ad7567b0-2802-4335-9793-d42e12609878",
+    "callId": "tool-call-199e19a5306e68a2f66e9df4",
+    "tool": "terminal.run",
+    "input": {
+      "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/tasks/task-scheduler.test.ts src/tasks/agent-step-executor.test.ts src/runtime/recoverable-draft.test.ts src/process/managed-command.test.ts src/process/process-tools.test.ts src/tools/workspace-tools.test.ts src/tools/delegation-tools.test.ts src/tasks/task-approval-service.test.ts src/tasks/sqlite-task-store.test.ts src/tasks/task-vertical-slice.test.ts src/tools/tool-executor.test.ts",
+      "verificationInputs": [
+        "."
+      ],
+      "verification": "estacoda-regressions",
+      "timeoutMs": null
+    },
+    "ok": true,
+    "process": {
+      "verification": "estacoda-regressions",
+      "verificationInputs": [
+        "."
+      ],
+      "id": "proc_acxhmkc9",
+      "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/tasks/task-scheduler.test.ts src/tasks/agent-step-executor.test.ts src/runtime/recoverable-draft.test.ts src/process/managed-command.test.ts src/process/process-tools.test.ts src/tools/workspace-tools.test.ts src/tools/delegation-tools.test.ts src/tasks/task-approval-service.test.ts src/tasks/sqlite-task-store.test.ts src/tasks/task-vertical-slice.test.ts src/tools/tool-executor.test.ts",
+      "cwd": "<BENCHMARK_ROOT>/before/comparison/workspace",
+      "status": "exited",
+      "startedAt": "2026-11-06T10:14:08.394Z",
+      "updatedAt": "2026-11-06T10:14:19.539Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    "running": false,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "cce7d24173fb6ca5d39ef6ed09e0c10fee3700f392a10a6a9ed681734f5a8c6c",
+    "contentTail": "or > abandons only optional pre-fetch secret URLs with cited later evidence: unavailable 96ms\n\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > abandons only optional pre-fetch secret URLs with cited later evidence: uncertain-effect 95ms\n\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > abandons only optional pre-fetch secret URLs with cited later evidence: other-failure 92ms\n\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > handles bounded passage recovery: recovered 93ms\n\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > handles bounded passage recovery: offset 92ms\n\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > handles bounded passage recovery: unrecovered 94ms\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > handles bounded passage recovery: different-source 95ms\n\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > handles bounded passage recovery: denied 104ms\n\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > handles bounded passage recovery: empty 96ms\n\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > accepts an exact read retry that succeeds later in the same Attempt 97ms\n\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > does not publish diagnostic output from denied or mutating tool activity 94ms\n\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > fails closed before child construction when live workspace trust is absent 95ms\n\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > fails closed before child construction when the scheduler provides no Attempt lease 91ms\n\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > cancels and cleans up a child resolved after construction-time cancellation 142ms\n\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > checkpoints and preserves a child resolved after construction-time host handoff 150ms\n\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > propagates the exact provider spending denial to the Task scheduler 88ms\n\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > continues from a checkpointed worker session and leaves it open during host handoff 95ms\n\n ✓ src/tasks/agent-step-executor.test.ts > AgentStepExecutor > captures artifact bytes only through the injected resolver and enforces the declared size 94ms\n\n Test Files  11 passed (11)\n\n      Tests  420 passed (420)\n\n   Start at  10:14:08\n\n   Duration"
+  },
+  {
+    "sessionId": "child_ad7567b0-2802-4335-9793-d42e12609878",
+    "callId": "tool-call-cf1c2b82812d9aa83c592487",
+    "tool": "terminal.run",
+    "input": {
+      "command": "python3 - <<'PY'\nimport json,hashlib\nm=json.load(open('MANIFEST.json'))\nfor p,h in m['updatedSourceHashes'].items(): print(p,hashlib.sha256(open(p,'rb').read()).hexdigest(), 'MATCH' if hashlib.sha256(open(p,'rb').read()).hexdigest()==h else 'MISMATCH')\nPY\nsed -n '1,100p' src/tools/tool-executor.ts; grep -nE 'verification|ProcessManager|timeoutMs|managed|approval|riskClass' src/tools/workspace-tools.ts | head -65; grep -nE 'trust|checkpoint|createChild|handoff|recoverable|accept|settlement|dispose|lease' src/tasks/agent-step-executor.ts | head -80",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": true,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "0cb9039448246057a66d51f2b66906d6f89770709176ac6eb57c369e8ab6af9b",
+    "contentTail": " not accepted or executed.\",\n478:          retryable: recoverable, uncertainSideEffects: !readOnly },\n480:        ...(recoverable ? safeDiagnosticOutput(text, []) : {})\n499:      result.disposition === \"accepted\" && result.kind === \"text\" && result.stepId !== undefined && input.step.dependsOn.includes(result.stepId));\n513:      const execution = await child.builtSession.toolExecutor.executeTool({ ...operation, trustedWorkspace: true,\n524:          uncertainSideEffects: execution.settlement?.sideEffectState === \"possible\" }, ...common\n543:    input.checkpoint({ milestone: \"result-captured\" });\n544:    return { outcome: \"succeeded\", ...common, results: [{ kind: \"text\", content: `Saved and verified the accepted report: ${outputs.map(output => output.path).join(\", \")}.`, summary: \"Accepted report exported and verified.\" }] };\n556:      (message.metadata?.accountingDiagnostic === true || message.metadata?.completionCandidate === true) && message.metadata.accepted === false);\n558:    return \"\\n\\nRecovery draft from this Step's previous attempt (not accepted evidence). Repair this draft; verify its relevant sources with your allowed tools. Do not repeat the entire investigation or assume previous citations are verified in this attempt.\\n\" +\n575:          input.checkpoint({ activity });\n653:    .filter((result) => result.status === \"available\" && result.disposition === \"accepted\" &&\n699:    ...(drafts.length === 0 ? [] : [`Unaccepted drafts available for inspection, not accepted evidence. They may identify successful observations worth independently verifying; preserve failed scope status and do not treat their claims as established: ${JSON.stringify(drafts)}`]),\n748:    \"Partial synthesis boundary: one or more dependencies did not complete successfully. Use only the available accepted dependency results; diagnostic or unavailable outputs are not evidence.\",\n759:  if (blocked.length > 0) return { message: \"A denied or pending operation remains recorded. This attempt cannot be accepted; preserve the supported draft and limitations. Do not retry denied operations. Rewriting the report cannot change this disposition.\", repairable: false };\n766:  // Use the same failure recovery decision before completion and at settlement.\n770:    message: `Research evidence needs correction: unresolved-tool-error. Unresolved executions: ${unresolved.map(execution => `${execution.toolCallId ?? \"unidentified\"} (${execution.tool.name}; effects ${execution.settlement?.sideEffectState ??"
+  },
+  {
+    "sessionId": "child_ad7567b0-2802-4335-9793-d42e12609878",
+    "callId": "tool-call-5f94e70bef034409959ecefa",
+    "tool": "terminal.run",
+    "input": {
+      "command": "nl -ba src/tools/workspace-tools.ts | sed -n '684,744p'; nl -ba src/process/process-manager.ts | sed -n '250,365p'; grep -nE 'async |#recoverAbandoned|#publish|#settle|acceptance|transaction|retry' src/tasks/task-scheduler.ts | tail -65; grep -nE 'verification|approval|assessSecurity|validateCurrent|assertCurrent|executeTool' src/tools/tool-executor.ts | head -70; git status --short; git log -1 --format='%H %s'; git cat-file -t 62246ec5afb60cde7d1a9cb4d57b0bcfb421f1b2",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": false,
+    "code": 128,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "ad8853ccc3d63c10c1648bd1eeac5b59569d42ff76e36f4f326d228c072ec0e9",
+    "contentTail": "sses.includes(failureRecord.class)) {\n2279:    return { retry: false, delayMs: 0, reason: \"failure-class-non-retryable\" };\n2281:  const explicitlyRetryable = step.retryPolicy.retryableFailureClasses.length === 0 ||\n2282:    step.retryPolicy.retryableFailureClasses.includes(failureRecord.class);\n2283:  if (!failureRecord.retryable || !explicitlyRetryable) {\n2284:    return { retry: false, delayMs: 0, reason: \"failure-not-retryable\" };\n2286:  if (step.retryPolicy.requireIdempotent && step.idempotency !== \"idempotent\" && step.idempotency !== \"retry_safe\") {\n2287:    return { retry: false, delayMs: 0, reason: \"idempotency-required\" };\n2290:    return { retry: false, delayMs: 0, reason: \"uncertain-side-effects\" };\n2292:  return { retry: true, delayMs: retryDelayMs(step, attempt.attemptNumber), reason: \"retry-policy-allowed\" };\n2296:  return step.idempotency === \"idempotent\" || step.idempotency === \"retry_safe\";\n2299:export function retryDelayMs(step: TaskStep, completedAttemptNumber: number): number {\n2300:  const raw = step.retryPolicy.initialBackoffMs *\n2301:    Math.pow(step.retryPolicy.backoffMultiplier, Math.max(0, completedAttemptNumber - 1));\n2302:  return Math.min(step.retryPolicy.maxBackoffMs, Math.max(0, Math.round(raw)));\n2318:    return failure(\"result-kind-mismatch\", \"Attempt result kind does not match Step acceptance policy.\", false, false);\n2341:    retryable: value.retryable === true,\n2380:  retryable: boolean,\n2383:  return { class: failureClass, message, retryable, uncertainSideEffects };\n2773:async function settlesWithin(work: Promise<void>, timeoutMs: number): Promise<boolean> {\n4:import { validateCurrentExecutionAuthority, withExecutionOperation } from \"../runtime/live-execution-authority.js\";\n5:import { assertCurrentExecutionFence } from \"../session/execution-fence-context.js\";\n8:import { type PendingActionApproval } from \"../security/pending-action-approval.js\";\n13:  assessSecurityPolicy,\n219:    return this.executeTool({\n234:  async executeTool(request: NamedToolExecutionRequest): Promise<ToolExecutionRecord | undefined> {\n378:      (completedMutation.status === \"verification-required\" || completedMutation.status === \"verified\")\n410:    let assessment = await assessSecurityPolicy(this.#securityPolicy, securityRequest);\n415:      this.#trajectoryRecorder.record(\"tool-approval-requested\", { tool: tool.name });\n436:        assessment = await assessSecurityPolicy(this.#securityPolicy, securityRequest);\n442:            reason: \"The approval d"
+  },
+  {
+    "sessionId": "child_ad7567b0-2802-4335-9793-d42e12609878",
+    "callId": "tool-call-2879b9c4adef9bdc929df24e",
+    "tool": "terminal.run",
+    "input": {
+      "command": "grep -nE '^(export |  (async |#|private ))|transaction|journal_mode' src/tasks/sqlite-task-store.ts | head -35; grep -nE '^(export |  async )|delegate_task|createTask|submit' src/tools/delegation-tools.ts | head -40; grep -nE 'verification|check' src/runtime/file-output-evidence.ts | head -40; grep -nE '^(export |  async )|approve|proposal' src/memory/memory-curation-service.ts | head -40; grep -nE '^(export |  async )|approval|stdio|timeout|initialize' src/mcp/mcp-client.ts | head -45; grep -nE '^(export |  async )|policy|riskClass|approval' src/mcp/mcp-tools.ts | head -45; grep -nE '^(export |  async )|queue|session|approval' src/channels/channel-gateway.ts | head -40; grep -nE '^(export |  async )|approve|validate|manifest' src/skills/skill-lifecycle.ts | head -45",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": true,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "8a211f1b6bd2bbcd03ee5356e31d4b773b544aaa18b35a07ef2411c7f45df823",
+    "contentTail": "js\";\n54:import { ChannelApprovalStore, type PersistedApprovalGrant } from \"./channel-approval-store.js\";\n55:import { buildBaseSessionId, normalizeSessionKey, type ChannelSessionPolicy, shouldAutoResetSession, stableSessionKey } from \"./channel-session-store.js\";\n68:} from \"../gateway/approval-queue.js\";\n84:} from \"./approval-actions.js\";\n108:import type { TurnUsageInspection, UsageInspection, UsageInspector } from \"../session/usage-inspector.js\";\n134:function sessionKeyHash(sessionId: string): string {\n135:  return createHash(\"sha256\").update(sessionId).digest(\"hex\").slice(0, 16);\n197:export type BusyPolicyConfig = {\n199:  queueDepth: number;\n203:export type ChannelTextDebounceConfig = {\n210:export type WhatsAppTextDebounceConfig = ChannelTextDebounceConfig;\n212:export type ChannelRuntimeFactory = (input: {\n213:  sessionId: string;\n214:  sessionKey: ChannelSessionKey;\n220:export type ChannelSessionStore = {\n221:  getOrCreateSessionId(sessionKey: ChannelSessionKey, options?: { receivedAt?: string }): Promise<string>;\n222:  resetSessionId?(sessionKey: ChannelSessionKey, options?: { receivedAt?: string }): Promise<string>;\n223:  setSessionId?(sessionKey: ChannelSessionKey, sessionId: string, options?: { receivedAt?: string }): Promise<void>;\n226:export type ChannelGatewayOptions = {\n229:  cronCommand?: (args: string[], message: ChannelMessage, sessionId: string) => Promise<{ ok: boolean; output: string }>;\n231:  approvalScopeForSession?: (sessionId: string) => Promise<ApprovalExecutionScope>;\n233:  validateSessionAttachment?: (sessionId: string) => Promise<void>;\n236:  sessionStore?: ChannelSessionStore;\n242:  approvalStore?: ChannelApprovalStore;\n243:  sessionPolicy?: ChannelSessionPolicy;\n255:  approvalQueue?: GatewayApprovalQueue;\n256:  /** Profile-scoped durable queue. Its presence means persistence is required; failures never fall back to memory. */\n272:  /** Stage 7: resolver for per-channel busy policy and queue depth config. */\n276:  /** Phase 7F: optional gateway-only pre-runtime session hygiene. */\n277:  sessionHygieneService?: Pick<SessionHygieneService, \"run\">;\n280:  enqueueSessionFinalization?: (input: {\n281:    sessionId: string;\n307:type ApprovalScope = \"once\" | \"session\" | \"always\";\n362:  approvalId?: string;\n3:export type SkillLifecycleDecision =\n10:export function isSkillLifecycleActive(state: SkillLifecycleState | undefined): boolean {\n14:export function canTransitionSkillLifecycle(input: {\n29:export function lifecycleStateForUsage(input: {"
+  },
+  {
+    "sessionId": "child_ad7567b0-2802-4335-9793-d42e12609878",
+    "callId": "tool-call-7bcd4b52d34c6e34e62eb6fb",
+    "tool": "terminal.run",
+    "input": {
+      "command": "date -u '+%Y-%m-%dT%H:%M:%SZ'; git rev-parse HEAD; git status --short; git cat-file -t 62246ec5afb60cde7d1a9cb4d57b0bcfb421f1b2; nl -ba src/memory/memory-curation-service.ts | head -125; nl -ba src/skills/skill-lifecycle.ts; nl -ba src/skills/skill-loader.ts | head -85; nl -ba src/mcp/mcp-tools.ts | sed -n '950,978p'; nl -ba src/process/process-manager.ts | sed -n '275,327p'",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": true,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "a18e3ecf1bb1eaad27be03df830b7a8d8e504f0b9343f909077870065f28a962",
+    "contentTail": "64\t  }\n   965\t  return config.toolRiskClass ?? defaultMcpRisk(config, transport, \"tool\");\n   966\t}\n   967\t\n   968\tfunction createResourceTools(\n   969\t  serverName: string,\n   970\t  config: MCPServerConfig,\n   971\t  client: MCPClient,\n   972\t  resources: MCPResourceDescriptor[]\n   973\t): RegisteredTool[] {\n   974\t  return [\n   975\t    {\n   976\t      name: prefixTool(serverName, config, \"resource.list\"),\n   977\t      description: `List MCP resources exposed by ${serverName}.`,\n   978\t      inputSchema: {\n   275\t      record.protectedEnvironmentVariable = undefined;\n   276\t      record.status = \"failed\";\n   277\t      record.updatedAt = this.#now().toISOString();\n   278\t      this.#appendLog(record, \"system\", error instanceof Error ? error.message : \"failed to start process\");\n   279\t    }\n   280\t\n   281\t  }\n   282\t\n   283\t  list(): ManagedProcessRecord[] {\n   284\t    return [...this.#processes.values()].map(toRecord);\n   285\t  }\n   286\t\n   287\t  get(id: string): ManagedProcessRecord | undefined {\n   288\t    const process = this.#processes.get(id);\n   289\t    return process === undefined ? undefined : toRecord(process);\n   290\t  }\n   291\t\n   292\t  logs(id: string, options: { tailChars?: number } = {}): ManagedProcessLog[] | undefined {\n   293\t    const process = this.#processes.get(id);\n   294\t\n   295\t    if (process === undefined) {\n   296\t      return undefined;\n   297\t    }\n   298\t    if (process.sensitiveOutput === true) return [];\n   299\t\n   300\t    const tailChars = options.tailChars ?? 12_000;\n   301\t    const logs: ManagedProcessLog[] = [];\n   302\t    let remaining = tailChars;\n   303\t\n   304\t    for (const log of [...process.logs].reverse()) {\n   305\t      if (remaining <= 0) {\n   306\t        break;\n   307\t      }\n   308\t\n   309\t      const text = log.text.length > remaining ? log.text.slice(log.text.length - remaining) : log.text;\n   310\t      logs.push({\n   311\t        ...log,\n   312\t        text\n   313\t      });\n   314\t      remaining -= text.length;\n   315\t    }\n   316\t\n   317\t    return logs.reverse();\n   318\t  }\n   319\t\n   320\t  async stop(id: string, signal: NodeJS.Signals = \"SIGTERM\"): Promise<ManagedProcessRecord | undefined> {\n   321\t    const process = this.#processes.get(id);\n   322\t\n   323\t    if (process === undefined) {\n   324\t      return undefined;\n   325\t    }\n   326\t\n   327\t    if ((process.status !== \"running\" && process.status !== \"stopped\") || process.child === undefined) {\n\nstderr:\nfatal: git cat-file: could not get object info"
+  },
+  {
+    "sessionId": "child_ad7567b0-2802-4335-9793-d42e12609878",
+    "callId": "tool-call-bf21f2ce9ef977eb7f3b9d8f",
+    "tool": "terminal.run",
+    "input": {
+      "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts --reporter=dot src/security/command-safety.test.ts src/security/dispatch-authorization.test.ts src/runtime/file-output-evidence.test.ts src/channels/channel-state-recovery.test.ts src/mcp/mcp-client.test.ts src/mcp/mcp-tools.test.ts src/skills/skill-loader.test.ts src/memory/memory-curation-service.test.ts",
+      "verificationInputs": [
+        "."
+      ],
+      "verification": "estacoda-regressions",
+      "timeoutMs": null
+    },
+    "ok": false,
+    "process": {
+      "verification": "estacoda-regressions",
+      "verificationInputs": [
+        "."
+      ],
+      "id": "proc_8jf4a9fh",
+      "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts --reporter=dot src/security/command-safety.test.ts src/security/dispatch-authorization.test.ts src/runtime/file-output-evidence.test.ts src/channels/channel-state-recovery.test.ts src/mcp/mcp-client.test.ts src/mcp/mcp-tools.test.ts src/skills/skill-loader.test.ts src/memory/memory-curation-service.test.ts",
+      "cwd": "<BENCHMARK_ROOT>/before/comparison/workspace",
+      "status": "failed",
+      "startedAt": "2026-11-06T10:15:03.884Z",
+      "updatedAt": "2026-11-06T10:15:05.940Z",
+      "exitCode": 1,
+      "signal": null
+    },
+    "running": false,
+    "code": 1,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "fe50621f90a007b4ca7eb117f6483517bdf606b45f8e0c6e04c98d7dcd6b24b7",
+    "contentTail": "Command failed: exit code 1, status failed.\n\nstarted pid 99692\n\n RUN  v4.1.6 <BENCHMARK_ROOT>/before/comparison/workspace\n\n·\n\n····\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n·\n\n···\n\n·\n\n····························\n\n···\n\n···\n\n·\n\n··\n\n·\n\n·\n\n··\n\n·\n\n·\n\n·\n\n·\n\n·\n\n··\n\n·\n\n··\n\n·\n\n··\n\n·\n\n·\n\n··\n\n·\n\n·\n\n··\n\n·\n\n·\n\n·\n\n··\n\n·\n\n·\n\n··\n\n·\n\n·\n\n··\n\n·\n\n·\n\n·\n\n··\n\n·\n\n·\n\n··\n\n·\n\n·\n\n···\n\n················\n\n············\n\n·\n\n··\n\n·\n\n·\n\n·\n\n··\n\n·\n\n·\n\n·\n\n·\n\n··\n\n···\n\n·······\n\n······\n\n·\n\n···\n\n·\n\n··\n\n·\n\n···\n\n·\n\n·\n\n··\n\n·\n\n··\n\n··\n\n··\n\n···\n\n··\n\n·\n\n··\n\n·\n\n·\n\n·\n\n··\n\n·\n\n·\n\n··\n\n··\n\n··\n\n·····\n\n········\n\n···\n\n·\n\n··\n\n··········\n\n··\n\n··\n\n·\n\n·\n\n·\n\n··\n\n·\n\n·\n\n·\n\n·\n\n··\n\n··\n\nx\n\n······························\n\n·\n\n··\n\n·········\n\n·\n\n·\n\n·········\n\n···\n\n··\n\n···\n\n············\n\n·\n\n···\n\n··\n\n··\n\n·\n\n·\n\n·\n\n·\n\n···\n\n··\n\n··\n\n··\n\n·\n\n··\n\n·\n\n··\n\n·\n\n··\n\n·\n\n··\n\n·\n\n·\n\n··\n\n·\n\n··\n\n·\n\n·\n\n··\n\n·\n\n·\n\n··\n\n·\n\n··\n\n·\n\n·\n\n··\n\n·\n\n·\n\n···\n\n·\n\n·\n\n··\n\n·\n\n··\n\n·\n\nstderr: \n⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯\n\nstderr:  FAIL  src/mcp/mcp-tools.test.ts > MCP per-tool risk classification > keeps the documented Postman generation toolbox complete and preserves job handles\n\nstderr: Error: ENOENT: no such file or directory, open '<BENCHMARK_ROOT>/before/comparison/workspace/docs/subsystems/mcp.md'\n\nstderr:  ❯ src/mcp/mcp-tools.test.ts:17:27\n\nstderr:      15| describe(\"MCP per-tool risk classification\", () => {\n     16|   it(\"keeps the documented Postman generation toolbox complete and pre…\n     17|     const documentation = await readFile(new URL(\"../../docs/subsystem…\n       |                           ^\n     18|     const recipe = [...documentation.matchAll(/```json\\n([\\s\\S]*?)\\n``…\n     19|       .map((match) => JSON.parse(match[1]!)).find((value) => value.mcp…\n\nstderr: \n\nstderr: ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯\n\n Test Files  1 failed | 7 passed (8)\n\n      Tests  1 failed | 417 passed (418)\n\n   Start at  10:15:04\n\n   Duration  1.86s (transform 1.55s, setup 79ms, import 1.88s, tests 2.24s, environment 0ms)\n\nclosed with code 1 signal null"
+  },
+  {
+    "sessionId": "child_80f986c2-8171-4633-aad9-101e6457e6a6",
+    "callId": "tool-call-81d02e24649aa683dd5410fc",
+    "tool": "terminal.run",
+    "input": {
+      "command": "pwd; ls -a; cat AGENTS.md; cat UPSTREAM.json",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": true,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "85027d395a679be97e5168a6d496aaced4f4eecd29d9759b63c4df7617d861e5",
+    "contentTail": "<BENCHMARK_ROOT>/before/comparison/workspace\n.\n..\n.git\nAGENTS.md\nMANIFEST.json\nUPSTREAM.json\nassets\nnode_modules\npackage.json\nregistries\nskills\nsrc\ntsconfig.json\nupstream\nvitest.node.config.ts\nworkers\nBenchmark environment: EstaCoda source is at this workspace root. Public pinned upstream checkouts are in upstream/superagent and upstream/harness when present. Their original revisions are in UPSTREAM.json. Dependencies are prepared without lifecycle scripts; do not assume all upstream tests work. Use their implementation and relevant existing tests, and disclose unavailable test prerequisites. These are source research fixtures, not deployed services. Never claim comparative live-model coding performance from native test counts.{\n  \"superagent\": \"8c32a9dc5d72c033816c6a8110b37f40cf94fba4\",\n  \"harness\": \"fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159\"\n}"
+  },
+  {
+    "sessionId": "child_80f986c2-8171-4633-aad9-101e6457e6a6",
+    "callId": "tool-call-7d79ea37ad843f8525d22838",
+    "tool": "terminal.run",
+    "input": {
+      "command": "find upstream/superagent -name AGENTS.md -o -name package.json -o -name '*test*' -o -name '*config*'; ls -a upstream/superagent; git -C upstream/superagent rev-parse HEAD; git -C upstream/superagent remote -v; cat upstream/superagent/package.json; sed -n '1,200p' upstream/superagent/README.md",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": true,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "15e0897c76e4f5d1b98516da1d694336e9473ce7cf50284e13c15a5fc5e4aaef",
+    "contentTail": "ficial DeepSeek product.** This code grew out of our team's day-to-day development work, with much of the engineering done by coding agents. Treat it as research code, not production-ready software. It may still contain bugs, and its coding style and engineering practices may be inconsistent. Review and adapt it before using it in your own environment.\n>\n> We have adapted it for publication, so it is not identical to our internal version or the implementation described in *Exploring Super-agent Design: Towards a More Autonomous Agent System*. Some designs discussed in the article are directions for future development and are not implemented in this prototype.\n\ndsh-superagent is a proactive coding agent for one GitHub repository, packaged as a bundle for [DeepSeek Harness](https://www.deepseek.com/en/harness/). It listens to GitHub and, optionally, Feishu. When someone allowed asks the agent for work, it opens a work item, works on it in its own agent session and directory, and answers in the original conversation, for example with a pull request. A web panel shows what needs a person.\n\nIt is also a way of working with an agent: **take as little human attention as possible, and give as much value as possible.** An agent that can act for a whole team can also waste a whole team's attention, so it acts only when asked or when a rule the team wrote allows it, and speaks only when someone must act or can use a result. [docs/000-philosophy.md](docs/000-philosophy.md) explains the principle and what it asks of the operator.\n\n## Setup\n\nSetup has many steps, so an agent does it with you. Ask your coding agent:\n\n> Read SETUP.md in this repository and set up dsh-superagent with me.\n\nIt asks one short question at a time, shows the full plan once, and then installs and configures everything. [SETUP.md](SETUP.md) is what it follows.\n\n## Documentation\n\nRead the numbered documents in order; each builds only on the ones before it.\n\n- [000 Philosophy](docs/000-philosophy.md)\n- [001 Domain model](docs/001-domain.md)\n- [002 Authorization](docs/002-authorization.md)\n- [003 Execution](docs/003-execution.md)\n- [004 Prompts](docs/004-prompts.md)\n- [005 Panel](docs/005-panel.md)\n- [006 Deployment](docs/006-deployment.md): manual setup, configuration, upgrades and troubleshooting\n- [007 Architecture](docs/007-architecture.md)\n- [008 Cookbook](docs/008-cookbook.md): adding a Source\n\n## Development\n\n`pnpm check` runs the typecheck, the tests and the build.\n\n## License\n\n[MIT](LICENSE)"
+  },
+  {
+    "sessionId": "child_80f986c2-8171-4633-aad9-101e6457e6a6",
+    "callId": "tool-call-f024aac4d9999eb8de7e80ca",
+    "tool": "terminal.run",
+    "input": {
+      "command": "date -u '+%Y-%m-%dT%H:%M:%SZ'; cat MANIFEST.json | head -60; nl -ba upstream/superagent/vitest.config.ts; find upstream/superagent/tests -maxdepth 2 -type f; find upstream/superagent/src -maxdepth 3 -type f; rg -n 'github.com/.*/|superagent|8c32a9' upstream/superagent/SETUP.md upstream/superagent/docs/006-deployment.md UPSTREAM.json | head -40; nl -ba upstream/superagent/docs/007-architecture.md | head -180",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": true,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "8abe2522d70995b30ecb917abdea6252231ec08848a971756c57d2dd5b1c69c6",
+    "contentTail": " to create an hourly schedule using this prompt, with the checkout path filled in:\nupstream/superagent/docs/006-deployment.md:138:Check dsh-superagent: run `scripts/dsh-superagent --profile superagent status` in <checkout>. Exit 0: do nothing and say nothing. Exit 2: do not restart; tell me each part under `errors` with its detail, unless you already told me about the same ones. Exit 3: do not restart; tell me what `setup` says setup needs, unless you already told me. If it reports manually_stopped: true, leave it stopped. Otherwise (exit 1) run `scripts/dsh-superagent --profile superagent --respect-stop restart`, which exits the same way: 0 means it recovered, so say nothing; 2 and 3 are reported as above; if it exits 1 or fails otherwise, read the newest .artifacts/dsh-superagent-superagent-*.log and the Troubleshooting section of docs/006-deployment.md, fix what you can, and tell me what was wrong and what you did.\nupstream/superagent/docs/006-deployment.md:152:   git -C /home/me/src/widgets fetch --no-tags \"https://github.com/$DSH_SUPERAGENT_GITHUB_REPOSITORY.git\" \"${DSH_SUPERAGENT_GITHUB_PR_HEAD:-HEAD}:refs/dsh-superagent/$DSH_SUPERAGENT_TICKET\" &&\nupstream/superagent/docs/006-deployment.md:153:   git -C /home/me/src/widgets worktree add -b \"agent/$DSH_SUPERAGENT_NAME\" \"$DSH_SUPERAGENT_DIR\" \"refs/dsh-superagent/$DSH_SUPERAGENT_TICKET\"\nupstream/superagent/docs/006-deployment.md:176:| `POST setup/check` | Runs setup again by restarting dsh-superagent: `restarting: true`. Refused when setup has nothing to fix |\nupstream/superagent/docs/006-deployment.md:227:A file in `worker-bin` or `worker-gitconfig` that dsh-superagent did not write stops setup. A Ticket directory inside a git repository whose own configuration adds credentials fails the Ticket.\nupstream/superagent/docs/006-deployment.md:238:4. Run `scripts/dsh-superagent restart` and inspect its status.\nupstream/superagent/docs/006-deployment.md:246:The worker and router presets move shell commands to the background after 5 seconds. A Session cannot load without its preset. Keep the `dsh-superagent-worker` and `dsh-superagent-router` rows in `cordis.patch.yml` while their Sessions are in use; otherwise resume fails with `agent-preset/not-found`.\nupstream/superagent/docs/006-deployment.md:260:| `git does not read the github.com credential configuration dsh-superagent writes` | Install git 2.32 or later |\nupstream/superagent/docs/006-deployment.md:262:| `… was not written by dsh-superagent` | Move the n"
+  },
+  {
+    "sessionId": "child_80f986c2-8171-4633-aad9-101e6457e6a6",
+    "callId": "tool-call-ec98c2079d46f06566ec4254",
+    "tool": "terminal.run",
+    "input": {
+      "command": "nl -ba upstream/superagent/docs/007-architecture.md | head -160; rg -n 'https://github.com/deepseek-ai|8c32a9' upstream/superagent --glob '!pnpm-lock.yaml' --glob '!node_modules/**' | head -25; ls upstream/superagent/src/app; ls upstream/superagent/src/sources; nl -ba upstream/superagent/tests/policy.spec.ts | head -180; nl -ba upstream/superagent/tests/runtime-concurrency.spec.ts | head -170; ls upstream/superagent/node_modules/.bin/vitest; node --version; git ls-tree HEAD upstream/superagent; git status --short upstream/superagent",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": true,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "638952701440bf8ba6e3183f5d455301067ee56ffa594b5a13b70806bea67fa1",
+    "contentTail": " message reached during a pause, if their Mandates still hold. An Eval whose candidate has not reached the main Session does not expire. While processing is paused, no Eval expires, and once it resumes each deadline moves later by the pause's length |\n    94\t| Settings | `policyChanged(from, to, effects)` | Tells each live Ticket the change bears on how (`policyEffects` in `src/policy.ts`: a rule it was accepted under changed or no longer applies, its requester may no longer start work, or proactive work is no longer accepted), and restarts the Evals in progress under the new version |\n    95\t\n    96\tThe Engine keeps batching, authorization, fan-out, resume and attention lifecycle rules private. Several shared predicates make these rules consistent:\n    97\t\n    98\t- `waitsForPerson` (`src/core/model.ts`): the latest Assignment reported `blocked` or `failed`, and no human message has arrived since. Automatic Inputs and failed launches remain held while this is true.\n    99\t- `followupOwners`: the Tickets still responsible for a human follow-up received on their own Threads. A Ticket can be live or ended without a human stop and waiting to resume. Handing back the message ends that ownership.\n   100\t- `settled`: a Decision resolved the request; stop, unavailable, routed and refused-stop Decisions do not count.\n   101\t- `ticketStage` (`src/core/stage.ts`): implements the stage table in [003 Execution](003-execution.md).\n   102\t\n   103\tWhen a Ticket ends, unread follow-ups return to Eval unless another Ticket still owns them or another disposition settled them. Acknowledged, answered and handed-back messages are excluded. For older records without acknowledgement dispositions, the outbox receipt supplies that fact. A final Report also covers messages waiting when the Assignment began, including the message that resumed it. The message that stopped a Ticket is not automatically re-evaluated.\n   104\t\n   105\tAfter a change, the Engine emits an event from `DomainEvents` in `src/core/ports.ts`:\n   106\t\n   107\t`trigger.received`, `eval.started`, `decision.recorded`, `ticket.created`, `ticket.resumed`, `ticket.ended`, `assignment.started`, `assignment.ended`, `thread.subscribed`, `thread.unsubscribed`, `trigger.requeued`, or `policy.changed`.\n   108\t\n   109\tRuntime turns `ticket.ended`, `trigger.requeued` and `thread.unsubscribed` into notices. A human `trigger.received` delivered to Tickets becomes a follow-up relay. `pullEndNotices` sends one chat notice, using a s"
+  },
+  {
+    "sessionId": "child_80f986c2-8171-4633-aad9-101e6457e6a6",
+    "callId": "tool-call-ac9d133ab9ff63189bd48ea0",
+    "tool": "terminal.run",
+    "input": {
+      "command": "rg -n 'https://github.com/deepseek-ai' upstream/superagent --glob '!pnpm-lock.yaml' --glob '!node_modules/**' | head -15; ls upstream/superagent/src/app; ls upstream/superagent/src/sources; node --version; ls upstream/superagent/node_modules/.bin/vitest; git ls-tree HEAD upstream/superagent; git -C upstream/superagent rev-parse --show-toplevel; rg -n 'it\\(|test\\(' upstream/superagent/tests/{policy,runtime-concurrency,runtime,sources,outbox,environment}.spec.ts",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": true,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "a956109f58ea65119db0b8e44b6ac0bf5363fc6f87ce6c432ee129788aa8d549",
+    "contentTail": "h.receive.mock.calls.map(([trigger]) => trigger.text.split('\\n')[0])\nupstream/superagent/tests/policy.spec.ts:32:  it('listens to configured chats, reads every message only where configured, and follows the direct-message switch', () => {\nupstream/superagent/tests/policy.spec.ts:40:  it('listens to nothing from a configured Source whose plugin is not loaded, and keeps an invalid stored configuration disabled', () => {\nupstream/superagent/tests/policy.spec.ts:49:  it('filters everything from a disabled Source', () => {\nupstream/superagent/tests/policy.spec.ts:54:  it('grants explicit strength when the sender is allowed in its Source\\'s part and the Source marked the Trigger addressed', () => {\nupstream/superagent/tests/policy.spec.ts:60:  it('checks each Source\\'s own list: a Feishu id allows nothing on GitHub', () => {\nupstream/superagent/tests/policy.spec.ts:67:  it('assesses follow-ups on Threads with Tickets, explicit from an allowed sender and inferred from anyone else', () => {\nupstream/superagent/tests/policy.spec.ts:76:  it('infers strength for allowed senders\\' messages the Source observes, unless Eval is off', () => {\nupstream/superagent/tests/policy.spec.ts:81:  it('admits no direct message from a sender the Source\\'s part does not allow, not even as a follow-up', () => {\nupstream/superagent/tests/policy.spec.ts:84:  it('rejects automated messages, unknown senders without a Thread, and allowed senders who did not address the agent', () => {\nupstream/superagent/tests/policy.spec.ts:102:  it('reproduces the behaviour before the table with every cell unset', () => {\nupstream/superagent/tests/policy.spec.ts:109:  it('makes an unlisted sender\\'s mention explicit or inferred as the row says, and an inferred one waits for a mode that assesses', () => {\nupstream/superagent/tests/policy.spec.ts:117:  it('ignores a listed sender\\'s unaddressed message where the row says so, and never reads the table for messages the chat does not receive', () => {\nupstream/superagent/tests/policy.spec.ts:123:  it('listens to mentions in chats that are not listed, as the row other, only when the Feishu card says so', () => {\nupstream/superagent/tests/policy.spec.ts:130:  it('admits no inferred follow-up while Eval is off, as no other inferred candidate, and still a listed sender\\'s', () => {\nupstream/superagent/tests/policy.spec.ts:137:  it('makes an explicit request of an unlisted sender\\'s message whose cell is explicit, also on a Thread with Tickets, in every mode', () ="
+  },
+  {
+    "sessionId": "child_80f986c2-8171-4633-aad9-101e6457e6a6",
+    "callId": "tool-call-1b586496c14959f0d4c93e61",
+    "tool": "terminal.run",
+    "input": {
+      "command": "sed -n '1,90p' upstream/superagent/tests/runtime-concurrency.spec.ts; sed -n '1,85p' upstream/superagent/tests/runtime.spec.ts; sed -n '1,60p' upstream/superagent/tests/sources.spec.ts; sed -n '1,65p' upstream/superagent/tests/fixtures/host.ts; rg -n 'github.com|repository|homepage' upstream/superagent/package.json upstream/superagent/README.md upstream/superagent/docs/000-philosophy.md upstream/superagent/.gitignore; rg -n '^(export )?(class|function)|^[ ]+(async )?[a-zA-Z]+\\(' upstream/superagent/src/{policy.ts,core/intake.ts,core/evals.ts,app/sessions.ts} | head -100",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": true,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "2d77aae998f88bf0be5ab5b17d3e281fd4577faa735e1ad660ec77b3c3a2c9fb",
+    "contentTail": "ourceRegistry(() => store.settings(), board)\n  const deployment = testDeployment()\n  sources.register(feishuKind); sources.register(githubKind)\n  const assessor: Assessor = { request: vi.fn(async () => {}) }\n  const executor: Executor = { start: vi.fn(async () => {}), deliver: vi.fn(async () => {}), stop: vi.fn(async () => {}) }\n  const outbox = { send: () => {}, status: () => undefined, withdraw: () => {} }\n  const engine = new Engine({ repo: store, scope: sources, policy: () => settingsPolicy(store.settings(), sources), assessor, executor, outbox })\n  const commands = new Commands(() => deployment, {}, new AbortController().signal)\n  const receive = vi.fn(async (trigger: Trigger) => { const result = engine.receive(trigger); engine.evaluateDue(); return result })\n  // Record outbound messages in the store without sending them.\n  const parts: SourceContextDeps = { store, engine, outbox: { send: message => { store.receipts.add(message) } }, commands, sources, deployment,\n    ready: Promise.resolve(), configured: () => true, receive, ...overrides }\n  // The Sources' functions take the context; plugin entries and kind callbacks take the host, which builds each kind's context.\n  const value = { ...parts, context: (kind: { kind: string; health: readonly string[] }) => sourceContextOf(parts, kind) }\n  const context = sourceContextOf(parts, { kind: 'feishu', health: ['github', 'feishu', 'history'] })\n  const health = overrides.sources ? healthOf.get(overrides.sources)!.all : board.all\n  return { ...value, ...context, health, store, engine, commands: parts.commands, receive, executor }\n}\nconst healthOf = new WeakMap<SourceRegistry, HealthBoard>()\nfunction emptyRegistry(): SourceRegistry {\n  const board = new HealthBoard()\n  const sources = new SourceRegistry(() => SettingsSchema.parse({}), board)\n  healthOf.set(sources, board)\n  return sources\n}\nconst subscribed = (h: ReturnType<typeof host>, ref: { source: string; id: string }, meta: Record<string, unknown> = {}) =>\n  h.store.threads.save({ key: `${ref.source}:${ref.id}`, ref, createdAt: new Date().toISOString(), subscriptions: ['ticket'], correlated: [], pending: [], meta })\nconst openTicket = (id: string): Ticket => ({ id, title: id, decisionId: `d-${id}`, mandate: { strength: 'explicit', policyVersion: '',\n  basis: { via: 'listed' }, actor: { source: 'github', id: 'alice' }, scope: '' },\n/**\n * In-memory DSH host fixture (as in tests/runtime.spec.ts) running a configured Runtime with GitHub and Feishu sources,"
+  },
+  {
+    "sessionId": "child_80f986c2-8171-4633-aad9-101e6457e6a6",
+    "callId": "tool-call-cbbd7f26a56b74b5a9acd8fd",
+    "tool": "terminal.run",
+    "input": {
+      "command": "cd upstream/superagent && ./node_modules/.bin/vitest run tests/policy.spec.ts tests/core-engine.spec.ts tests/sources.spec.ts tests/runtime-concurrency.spec.ts tests/runtime.spec.ts tests/outbox.spec.ts tests/environment.spec.ts",
+      "verificationInputs": [
+        "."
+      ],
+      "verification": "superagent-regressions",
+      "timeoutMs": null
+    },
+    "ok": true,
+    "process": {
+      "verification": "superagent-regressions",
+      "verificationInputs": [
+        "."
+      ],
+      "id": "proc_xnszvpxj",
+      "command": "cd upstream/superagent && ./node_modules/.bin/vitest run tests/policy.spec.ts tests/core-engine.spec.ts tests/sources.spec.ts tests/runtime-concurrency.spec.ts tests/runtime.spec.ts tests/outbox.spec.ts tests/environment.spec.ts",
+      "cwd": "<BENCHMARK_ROOT>/before/comparison/workspace",
+      "status": "exited",
+      "startedAt": "2026-11-06T10:10:51.033Z",
+      "updatedAt": "2026-11-06T10:11:01.089Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    "running": false,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "dc39b39f355bfb471655c7940a71f10e4c0fd947b02e30973e9cb45269da3a43",
+    "contentTail": "started pid 87683\n\n RUN  v4.1.8 <BENCHMARK_ROOT>/before/comparison/workspace/upstream/superagent\n\nstderr: (node:87694) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n\n ✓ tests/core-engine.spec.ts (113 tests) 145ms\n\nstderr: (node:87697) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n\nstderr: (node:87695) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n\nstderr: (node:87693) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n\n ✓ tests/policy.spec.ts (328 tests) 32ms\n\n ✓ tests/outbox.spec.ts (2 tests) 105ms\n\n ✓ tests/environment.spec.ts (13 tests) 1723ms\n     ✓ run a wrapper that calls `gh` by name without reaching the shim again, and keep the caller's other PATH entries  383ms\n     ✓ keep `gh` and `lark-cli` working, and shim no `git`, when the blocked commands name the commands workers need  504ms\n\n ✓ tests/sources.spec.ts (71 tests) 4363ms\n     ✓ drops the events it reads once the Source is off  1490ms\n     ✓ starts the consumer again after it exits, and is ready once the next run listens  1195ms\n\n ✓ tests/runtime.spec.ts (91 tests) 5015ms\n\n ✓ tests/runtime-concurrency.spec.ts (56 tests) 8791ms\n\n     ✓ holds a delivery that reached a worker while a hand-off stopped its subagents until the stop ended  4026ms\n\n Test Files  7 passed (7)\n\n      Tests  674 passed (674)\n\n   Start at  10:10:51\n\n   Duration  9.79s (transform 3.13s, setup 0ms, import 4.72s, tests 20.18s, environment 4ms)\n\nclosed with code 0 signal null"
+  },
+  {
+    "sessionId": "child_80f986c2-8171-4633-aad9-101e6457e6a6",
+    "callId": "tool-call-2649e4a67d9da38e504d68f7",
+    "tool": "terminal.run",
+    "input": {
+      "command": "nl -ba UPSTREAM.json; nl -ba upstream/superagent/README.md | head -16; rg -n 'https?://[^ )\"<>]+' upstream/superagent/{README.md,SETUP.md,package.json,docs,examples} | head -35; nl -ba upstream/superagent/src/core/intake.ts | head -135; nl -ba upstream/superagent/src/sources/github.ts | head -150; nl -ba upstream/superagent/src/sources/feishu-trigger.ts | head -100",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": true,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "499c63d64a41afe798c526f7ddd113b7fbd6d86bebb2d97613fb997651644331",
+    "contentTail": "ly what addresses the agent.\n    59\t  scope: ({ meta }, config) => {\n    60\t    const row = scopeOf(meta)\n    61\t    return { listened: true, observed: row !== undefined && config[OBSERVED[row]], ...row ? { row } : {} }\n    62\t  },\n    63\t  health: ['github'],\n    64\t  channel: { send: sendGithub, link: githubLink },\n    65\t  threadContext: githubThreadContext,\n    66\t  // `#12`, `12`, or the page of an Issue or PR, of any repository, names Thread 12.\n    67\t  find: query => {\n    68\t    const number = (/^#?(\\d+)$/.exec(query.trim()) ?? /github\\.com\\/[^/]+\\/[^/]+\\/(?:pull|issues)\\/(\\d+)/.exec(query))?.[1]\n    69\t    return { threads: number ? [`${SOURCE}:${number}`] : [], terms: [] }\n    70\t  },\n    71\t  policy: {\n    72\t    schema: z.object({ allowed: z.array(z.object({ id: z.string().regex(/^[A-Za-z0-9-]+$/) }).strict()).default([]),\n    73\t      bots: z.array(z.object({ id: z.string().regex(/^[A-Za-z0-9-]+(\\[bot\\])?$/) }).strict()).optional() }).strict(),\n    74\t    fields: [{ key: 'allowed', type: 'rows', label: { zh: '能发起工作的 GitHub 账号', en: 'GitHub accounts that may originate work' },\n    75\t      columns: [{ key: 'id', type: 'text', label: { zh: '账号', en: 'Account' }, pattern: '[A-Za-z0-9\\\\-]+' }] },\n    76\t    { key: 'bots', type: 'rows', label: { zh: '评论可以成为候选的机器人', en: 'Bots whose comments may become candidates' },\n    77\t      hint: { zh: '名单里的机器人账号（例如 dependabot[bot]）的评论在来源收到时成为推断的候选，交给评估：评论 @ 了智能体，或者打开了“接收仓库里的评论”。它们不能发起明确的请求，也不能停止工单；其他机器人的评论不接收。', en: 'A comment of a bot account on this list, such as dependabot[bot], becomes an inferred candidate for an assessment when the Source receives it: when it mentions the agent, or with Receive comments in the repository on. Such a comment never makes an explicit request or stops a ticket; other bots\\' comments are not admitted.' },\n    78\t      columns: [{ key: 'id', type: 'text', label: { zh: '账号', en: 'Account' }, pattern: '[A-Za-z0-9\\\\-]+(\\\\[bot\\\\])?' }] }],\n    79\t    explicit: { zh: '名单里的账号在 Issue 或评论里 @ 智能体的账号。', en: 'An account on the list mentions the agent\\'s account in an Issue or a comment.' },\n    80\t    rows(stored) {\n    81\t      const config = GithubConfigSchema.partial().parse(stored)\n    82\t      const note = (observed: boolean | undefined) => observed ? { zh: '全部', en: 'All' } : { zh: '仅 @', en: '@ only' }\n    83\t      const row = (id: Scope, label: { zh: string; en: string }) => ({ id, label, note: note(config[OBSERVED[id]]),\n    84\t        cells: { listedUnaddressed: !!config[OBSERV"
+  },
+  {
+    "sessionId": "child_80f986c2-8171-4633-aad9-101e6457e6a6",
+    "callId": "tool-call-b660ccec635d86d484b22b75",
+    "tool": "terminal.run",
+    "input": {
+      "command": "rg -n '^(export )?(async )?(function|class)|^  (async )?(start|launch|resume|prepare|create|receive|send|decide|accept)|worktree|mkdir|session.create|sessions.create' upstream/superagent/src/{executor/dsh.ts,app/runtime.ts,app/sessions.ts,core/evals.ts,core/tickets.ts,sources/github-channel.ts,sources/feishu-channel.ts,sources/github-pull.ts,sources/feishu-loops.ts,sources/github.ts}; rg -n 'recovery|interrupted|restart|stale|permission|unauthorized|mandate|revok|not allowed|stopp|slots|parallel|concurr|duplicate' upstream/superagent/tests/{core-engine,runtime,runtime-concurrency,policy}.spec.ts | head -75; git cat-file -t 8c32a9dc5d72c033816c6a8110b37f40cf94fba4; rg -n 'github.com/deepseek-ai/dsh-superagent|github.com/deepseek-ai/superagent' UPSTREAM.json upstream/superagent --glob '!node_modules/**' --glob '!pnpm-lock.yaml'",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": false,
+    "code": 1,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "6be74192dfdfad41403ba59bd9aaeac9c9c3f3b384c89875780bbcbff54561d3",
+    "contentTail": "e({ kind: 'ignore', trigger_id: b1.id, reason: 'duplicate' })\nupstream/superagent/tests/runtime-concurrency.spec.ts:51:it('delivers nothing to a ticket a person stopped while an earlier ticket\\'s delivery waited', async () => {\nupstream/superagent/tests/runtime-concurrency.spec.ts:69:it('drops a delivery whose ticket a person stopped while it waited for the worker Session', async () => {\nupstream/superagent/tests/runtime-concurrency.spec.ts:352:  it('frees the slot of a worker that reports blocked, stopping its subagents and leaving its jobs, whose end wakes no one', async () => {\nupstream/superagent/tests/runtime-concurrency.spec.ts:505:  it('holds a delivery that reached a worker while a hand-off stopped its subagents until the stop ended', async () => {\nupstream/superagent/tests/runtime-concurrency.spec.ts:529:  it('keeps an Input a restart found handed over to a settled worker, and delivers a waiting one once its subagents stopped', async () => {\nupstream/superagent/tests/runtime-concurrency.spec.ts:558:  it('collects the end of a job left to a person until dsh-superagent stopped its workers', async () => {\nupstream/superagent/tests/runtime-concurrency.spec.ts:597:  it('stops the jobs and the turn of a worker a restart in this process left running, before its Assignment starts again', async () => {\nupstream/superagent/tests/runtime-concurrency.spec.ts:603:    expect(h.runtime.store.tickets.get(one.ticket.id)!.inputs).toEqual([expect.objectContaining({ kind: 'text', text: expect.stringContaining('host restarted') })])\nupstream/superagent/tests/runtime-concurrency.spec.ts:681:  it('keeps a note waiting in a worker\\'s Session across an in-process restart, for the next Assignment\\'s first step', async () => {\nupstream/superagent/tests/runtime-concurrency.spec.ts:688:    // The restart cancels the worker's turn and keeps its inbox, where the note waits.\nupstream/superagent/tests/runtime-concurrency.spec.ts:693:  it('delivers once a message a crash left waiting in a worker\\'s Session, which the restart puts back for the next Assignment', async () => {\nupstream/superagent/tests/runtime-concurrency.spec.ts:698:    // The process dies: the worker's agent is not loaded when the restart runs, and its inbox, which holds the message,\nupstream/superagent/tests/runtime-concurrency.spec.ts:710:  it('gives the Assignment an in-process restart starts a message a cut-off step had claimed, once', async () => {\nupstream/superagent/tests/runtime-concurrency.spec.ts:715:    "
+  },
+  {
+    "sessionId": "child_80f986c2-8171-4633-aad9-101e6457e6a6",
+    "callId": "tool-call-698648a998eed72855191ab4",
+    "tool": "terminal.run",
+    "input": {
+      "command": "rg -n 'async |prepare|sessions.ensure|mkdir|verifyDirectory' upstream/superagent/src/executor/dsh.ts | tail -45; rg -n 'gate\\(|revalidate|create\\(|accept\\(|decide\\(' upstream/superagent/src/core/{evals,tickets}.ts; rg -n 'ensure\\(|create\\(|resolveAgent|prompt\\(' upstream/superagent/src/app/sessions.ts; rg -n 'atomic|lock|resume\\(|new Engine|new DshExecutor|new Store' upstream/superagent/src/app/runtime.ts; rg -n 'async|gh\\(|lark\\(' upstream/superagent/src/sources/{github-channel,feishu-channel}.ts; git cat-file -t 8c32a9dc5d72c033816c6a8110b37f40cf94fba4; git status --short --untracked-files=no",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": true,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "4925dc34ac39743ff245d83ff4a32c88adf501efdfeac7f87f92e8a262e47909",
+    "contentTail": "'steer'), { ordered: true })\n138:  async ensure(id: string, cwd: string, title: string, role: 'orchestrator' | 'worker'): Promise<Agent> {\n140:    let result = await ctx.sessionController.resolveAgent(id as SessionId)\n142:      const workspace = await ctx.workspaceRegistry.create(cwd)\n144:      await ctx.sessionController.create({ sessionId: id as SessionId, workspaceId: workspace.id,\n146:      result = await ctx.sessionController.resolveAgent(id as SessionId)\n158:    const result = await this.ctx.sessionController.resolveAgent(sessionId as SessionId)\n162:  async prompt(sessionId: string, requestId: string, text: string, mode: 'queue' | 'steer' | { inject: string }, authorize?: () => void,\n164:    const result = await this.ctx.sessionController.resolveAgent(sessionId as SessionId)\n181:    const resolved = await this.ctx.sessionController.resolveAgent(this.host.masterId as SessionId)\n15:import { lockSync } from 'proper-lockfile'\n93:    const release = lockSync(machine.stateDir, { stale: 30_000, onCompromised: compromised })\n98:      const store = opened = this.store = new Store(join(machine.stateDir, 'orchestrator.sqlite'), report)\n128:      this.executor = new DshExecutor({ context: ctx, get engine() { return runtime.engine }, store, effects, health: board.claim('worker'), machine,\n137:      const engine = this.engine = new Engine({ repo: store, scope: sources, policy, assessor, executor,\n168:      // Release the database and state lock if initialization fails so an in-process restart can reacquire them.\n174:  /** Aborted when dsh-superagent stops or loses its state directory lock, cancelling running reads and subprocesses. */\n214:    this.executor.resume()\n245:      // Close the database before releasing the directory lock so another process cannot open the database mid-write; a compromised lock may already be released.\n248:        const unreleased = (error: unknown) => { this.ctx.logger.warn('dsh-superagent could not release its state directory lock: %s',\nupstream/superagent/src/sources/feishu-channel.ts:19:export async function sendFeishu(host: Pick<SourceContext, 'commands'>, message: OutboundMessage): Promise<'sent' | 'gone'> {\nupstream/superagent/src/sources/feishu-channel.ts:24:  try { await host.commands.lark(reply) }\nupstream/superagent/src/sources/github-channel.ts:18:export async function sendGithub(host: Pick<SourceContext, 'commands'>, message: OutboundMessage): Promise<'sent' | 'gone'> {\n\nstderr:\nfatal: git cat-file: could not get object info"
+  },
+  {
+    "sessionId": "child_80f986c2-8171-4633-aad9-101e6457e6a6",
+    "callId": "tool-call-1b4c30bddcccefb315d96936",
+    "tool": "terminal.run",
+    "input": {
+      "command": "nl -ba upstream/superagent/src/sources/github-channel.ts | head -48; nl -ba upstream/superagent/src/sources/feishu-channel.ts | head -44; nl -ba upstream/superagent/src/core/evals.ts | sed -n '265,320p'; nl -ba upstream/superagent/src/core/tickets.ts | sed -n '30,66p'; nl -ba upstream/superagent/src/executor/dsh.ts | sed -n '238,263p'; nl -ba upstream/superagent/src/app/outbox.ts | head -105; rg -n 'gh pr|pull request|worktree add' upstream/superagent/{prompts,skills,examples,src/policy.ts}; nl -ba upstream/superagent/src/sources/feishu-loops.ts | sed -n '20,105p'",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": true,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "11a8ab07352414dd1b96a298cabd8800e5508046c6500ea3c4eef3e80c518947",
+    "contentTail": "rn { ...ticket, execution: ticketExecution(ticket, outcome, this.host.store.settings(), this.host.machine.stateDir) }\n   240\t  }\n   241\t  /**\n   242\t   * Runs the configured `executor.prepare` command for a new ticket workspace in its parent directory with the ticket's\n   243\t   * execution environment variables, then verifies the directory as the worker sees it.\n   244\t   * A failed prepare command throws `PrepareFailed`, which is not retried automatically; an empty directory it left is removed, a non-empty one kept.\n   245\t   * @throws PrepareFailed with the command's output when the prepare command fails.\n   246\t   */\n   247\t  private async prepareDirectory(ticket: Ticket): Promise<void> {\n   248\t    const directory = ticket.execution?.directory ?? ''\n   249\t    await mkdir(dirname(directory), { recursive: true })\n   250\t    const command = this.host.store.settings().executor.prepare.trim()\n   251\t    const env = Object.fromEntries(this.host.environment(ticket).map(variable => [variable.key, variable.value]))\n   252\t    // Enforce a timeout so a hung prepare command (such as on a credential prompt) fails the ticket instead of holding a worker slot indefinitely.\n   253\t    const signal = AbortSignal.any([this.host.lifetime, AbortSignal.timeout(PREPARE_TIMEOUT_MS)])\n   254\t    if (command) await runAsWorker(this.host.context.subprocess, ['sh', '-c', command], dirname(directory), signal, env)\n   255\t      .catch(async (error: unknown) => {\n   256\t        // Remove an empty directory left by a failed prepare command so a later retry does not treat it as already prepared.\n   257\t        await rmdir(directory).catch(() => { /* Absent, or holding what the command wrote, which the output explains. */ })\n   258\t        throw new PrepareFailed(`The prepare command failed: ${error instanceof Error ? error.message : String(error)}`)\n   259\t      })\n   260\t    await mkdir(directory, { recursive: true })\n   261\t    await verifyDirectory(directory, this.host.context.subprocess, this.host.lifetime)\n   262\t  }\n   263\t  /** Enqueues a `launch` effect for an accepted or resumed assignment; launches start in queue order as worker slots free up. */\n     1\t/** Reliable outbound message delivery backed by persistent receipts and retried reply effects. */\n     2\timport type { OutboundMessage, Outbox as OutboxPort, ReplyStatus } from '../core/index.ts'\n     3\timport type { Commands } from '../infra/commands.ts'\n     4\timport { checkedImText } from '../infra/text.ts'\n     5\timpo"
+  },
+  {
+    "sessionId": "child_80f986c2-8171-4633-aad9-101e6457e6a6",
+    "callId": "tool-call-b1141dd56f5fbbf93344ffd8",
+    "tool": "terminal.run",
+    "input": {
+      "command": "rg -n 'gh pr|worktree add|pull request|PR' upstream/superagent/prompts/worker* upstream/superagent/skills upstream/superagent/examples | head -45; rg -n 'recovery|restart|interrupted|lock|prepare command' upstream/superagent/tests/runtime.spec.ts | head -25; rg -n 'gate\\(|settingsPolicy|allowedSender' upstream/superagent/src/policy.ts; rg -n 'function|export' upstream/superagent/src/sources/{github-trigger,feishu-trigger}.ts | head -25; nl -ba upstream/superagent/src/app/outbox.ts | sed -n '22,100p'; nl -ba upstream/superagent/src/sources/feishu-loops.ts | sed -n '24,105p'",
+      "verificationInputs": null,
+      "verification": null,
+      "timeoutMs": 10000
+    },
+    "ok": true,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "50931e3d640ce7bebc3a90d707dc1b7ff7f2bb7178fe1521548b2a83cc57dfa4",
+    "contentTail": ")\n    33\t}\n    34\tconst chatLink = (ctx: SourceContext, chatId: string): string => feishuChatLink(ctx.deployment.feishu?.brand ?? 'feishu', chatId)\n    35\tfunction available(ctx: SourceContext): boolean {\n    36\t  if (ctx.configured() && ctx.deployment.feishu) return true\n    37\t  const waiting = health('paused', ctx.configured() ? 'feishuCliUnset' : 'setupPending')\n    38\t  ctx.report('feishu', ctx.problem ? { state: 'paused', detail: ctx.problem.detail } : waiting)\n    39\t  return false\n    40\t}\n    41\t\n    42\t/** Runs the live event consumer only while the Source is enabled; disabling it stops the consumer within five seconds. */\n    43\tasync function watch(ctx: SourceContext, signal: AbortSignal): Promise<void> {\n    44\t  await ctx.ready\n    45\t  // Setup restarts dsh-superagent once it resolves the bot; until then nothing runs.\n    46\t  if (!available(ctx)) return\n    47\t  let retry: number | undefined\n    48\t  while (!signal.aborted) {\n    49\t    if (!enabled(ctx)) {\n    50\t      ctx.report('feishu', health('paused', 'sourceOff'))\n    51\t      await delay(5000, undefined, { signal }).catch(() => {})\n    52\t      continue\n    53\t    }\n    54\t    const running = new AbortController()\n    55\t    const check = setInterval(() => { if (!enabled(ctx)) running.abort() }, 5000)\n    56\t    const stop = () => running.abort()\n    57\t    signal.addEventListener('abort', stop, { once: true })\n    58\t    const began = Date.now()\n    59\t    try { await consume(ctx, running.signal) }\n    60\t    catch (error) { if (!running.signal.aborted) ctx.report('feishu', { state: 'error', detail: String(error) }) }\n    61\t    finally { clearInterval(check); signal.removeEventListener('abort', stop) }\n    62\t    if (running.signal.aborted) continue\n    63\t    retry = consumerRetry(retry, Date.now() - began)\n    64\t    await delay(retry, undefined, { signal }).catch(() => {})\n    65\t  }\n    66\t}\n    67\t/** Wait before restarting the event consumer: 1s after a run that stayed up for a minute, otherwise exponential backoff up to 60s. */\n    68\texport const consumerRetry = (previous: number | undefined, ranMs: number): number =>\n    69\t  previous === undefined || ranMs >= 60_000 ? 1000 : Math.min(previous * 2, 60_000)\n    70\tasync function consume(ctx: SourceContext, signal: AbortSignal): Promise<void> {\n    71\t  const child = spawn(bot(ctx).cli, ['event', 'consume', 'im.message.receive_v1', '--as', 'bot'],\n    72\t    { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, LARKSUIT"
+  },
+  {
+    "sessionId": "child_fe432eef-26b2-4c57-a1d3-89bcf3127651",
+    "callId": "tool-call-5d7005e768d2c8004a6febba",
+    "tool": "terminal.run",
+    "input": {
+      "command": "cd upstream/harness && node --version && ./node_modules/.bin/vitest run packages/core/agent-loop/tests/resume.spec.ts packages/core/agent-loop/tests/tool-order.spec.ts packages/interaction/user-approval/tests/approval.spec.ts packages/sandbox/sandbox-policy/tests/policy.spec.ts packages/mcp/mcp-client/tests/tool-definition.spec.ts --maxWorkers=1 --reporter=verbose",
+      "verificationInputs": [
+        "."
+      ],
+      "verification": "harness-regressions",
+      "timeoutMs": 30000
+    },
+    "ok": true,
+    "code": 0,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "db6ceefeeecfda91304b62caa9ce188f39c215b84c0b75462643b488379daf2a",
+    "contentTail": "pproval/tests/approval.spec.ts > ApprovalService.request > discards a late REJECTION after abort without an unhandled rejection 4ms\n ✓ |thread-safe| packages/interaction/user-approval/tests/approval.spec.ts > ApprovalService.request > resolves the answer when the signal never aborts 2ms\n ✓ |thread-safe| packages/interaction/user-approval/tests/approval.spec.ts > ApprovalService.request > issues a fresh id per request 1ms\n ✓ |thread-safe| packages/interaction/user-approval/tests/approval.spec.ts > ApprovalService.request > drops a disposed plugin listener from the chain (HMR safety) 1ms\n ✓ |thread-safe| packages/interaction/user-approval/tests/approval.spec.ts > approval policy (the approval/policy fold) > folds to the last event, or undefined without one 1ms\n ✓ |thread-safe| packages/interaction/user-approval/tests/approval.spec.ts > approval policy (the approval/policy fold) > rejects a policy outside the closed vocabulary before appending 0ms\n ✓ |thread-safe| packages/interaction/user-approval/tests/approval.spec.ts > approval policy (the approval/policy fold) > defaults an omitted policy to ask 5ms\n ✓ |thread-safe| packages/interaction/user-approval/tests/approval.spec.ts > approval policy (the approval/policy fold) > contains an answerer that throws SYNCHRONOUSLY as unavailable 2ms\n ✓ |thread-safe| packages/interaction/user-approval/tests/approval.spec.ts > approval policy (the approval/policy fold) > a never config rejects deterministically without consulting any answerer 2ms\n ✓ |thread-safe| packages/interaction/user-approval/tests/approval.spec.ts > approval policy (the approval/policy fold) > the gate decides FIRST even against an answerer registered before the service (prepend) 4ms\n ✓ |thread-safe| packages/interaction/user-approval/tests/approval.spec.ts > approval policy (the approval/policy fold) > never is unbypassable even by an answerer PREPENDED after the service mounts 2ms\n ✓ |thread-safe| packages/interaction/user-approval/tests/approval.spec.ts > approval policy (the approval/policy fold) > a session override outranks the configured default, in both directions 1ms\n ✓ |thread-safe| packages/interaction/user-approval/tests/approval.spec.ts > approval policy (the approval/policy fold) > queues a live policy switch for the next model step 2ms\n ✓ |thread-safe| packages/interaction/user-approval/tests/approval.spec.ts > approval policy (the approval/policy fold) > contributes the complete current ask or never policy as cache-safe context 4ms\n\n"
+  }
+]

@@ -680,7 +680,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
       // Let the command timer collect its outcome before the outer tool deadline.
       executionTimeoutMs: commandTimeoutMs + 5_000,
       description: options.processManager
-        ? `Run a shell command in the active workspace. With timeoutMs omitted or null, wait up to ${Math.min(commandTimeoutMs, 30_000)} ms, then return a managed process ID if still running. Use process.logs (bounded wait) until it exits; process.stop cancels it. A running process is not task completion. An explicit timeoutMs is a hard execution limit.`
+        ? `Run a shell command in the active workspace. With timeoutMs omitted or null, wait up to ${Math.min(commandTimeoutMs, 30_000)} ms, then return a managed process ID if still running. Use process.logs (bounded wait) until it exits; process.stop cancels it. A running process is not task completion. Use waitMs for a short initial wait (for example 1000); this never kills the command. timeoutMs is only for an intentional hard execution deadline, not responsiveness. Omit it for tests/builds of unknown duration; the task budget and cancellation still apply.`
         : `Run a shell command in the active workspace for at most ${commandTimeoutMs} ms. For longer jobs, discover and request managed process tools, then start and poll the process within the task budget.`,
       inputSchema: {
         type: "object",
@@ -688,7 +688,8 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           command: { type: "string" },
           verificationInputs: verificationInputsSchema,
           verification: { type: ["string", "null"], pattern: "^[a-z][a-z0-9-]{0,79}$", description: "Stable name of the task requirement this command checks, e.g. package-installation or unit-tests. Reuse the same name for alternative implementations and rechecks of that requirement. Omit or use null for exploration or debugging a method. Each declared requirement needs a successful check on current output; unrelated checks cannot clear it. Preserve the check exit status. This grants no execution authority." },
-          timeoutMs: { type: ["number", "null"], minimum: 1, maximum: commandTimeoutMs, description: `Explicit hard execution limit in milliseconds, maximum ${commandTimeoutMs}. Omit or use null for the default behavior described above.` }
+          ...(options.processManager ? { waitMs: { type: ["number", "null"], minimum: 0, maximum: Math.min(commandTimeoutMs, 30_000), description: "Initial observation wait in milliseconds. Returns a process ID if still running; does not stop execution. Poll that same ID with process.logs. Do not combine with timeoutMs." } } : {}),
+          timeoutMs: { type: ["number", "null"], minimum: 1, maximum: commandTimeoutMs, description: `Hard kill deadline in milliseconds, maximum ${commandTimeoutMs}. NOT a polling wait. Omit or use null unless intentionally bounding execution${options.processManager ? "; use waitMs to return sooner." : "."}` }
         },
         required: ["command"]
       },
@@ -702,7 +703,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
       // normal authorization. Signals, deadlines and cancellation stay uncertain.
       isFailureOutcomeKnown: result => Number.isInteger(result.metadata?.code) &&
         result.metadata?.signal === null && result.metadata.timedOut === false && result.metadata.cancelled === false,
-      run: async (input: { command?: string; timeoutMs?: number | null; verification?: string | null; verificationInputs?: string[] | null }, context) => {
+      run: async (input: { command?: string; waitMs?: number | null; timeoutMs?: number | null; verification?: string | null; verificationInputs?: string[] | null }, context) => {
         if (typeof input.command !== "string" || input.command.trim().length === 0) {
           return errorResult("command must be a non-empty string");
         }
@@ -722,10 +723,16 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           return undispatchedResult(errorResult(`Command was not started: timeoutMs must be between 1 and ${commandTimeoutMs}. For longer jobs, discover and request managed process tools, then start and poll the process within the task budget.`));
         }
 
+        if (input.waitMs != null && input.timeoutMs != null) {
+          return undispatchedResult(errorResult("Command was not started: choose waitMs to yield OR timeoutMs to run until an explicit hard deadline; do not combine them."));
+        }
+        if (input.waitMs != null && (!options.processManager || !Number.isFinite(input.waitMs) || input.waitMs < 0 || input.waitMs > Math.min(commandTimeoutMs, 30_000))) {
+          return undispatchedResult(errorResult(`Command was not started: waitMs requires managed processes and must be between 0 and ${Math.min(commandTimeoutMs, 30_000)}.`));
+        }
         try { await contentView.assertMaterialized(); } catch (error) { return errorResult(error instanceof Error ? error.message : "Editor content is not materialized."); }
         const signal = AbortSignal.any([...[context?.signal, options.executionLease?.signal].filter((value): value is AbortSignal => value !== undefined)]);
-        if (options.processManager && input.timeoutMs == null) {
-          return runManagedCommand(options.processManager, input.command, Math.min(commandTimeoutMs, 30_000), signal, context?.continuationSignal ?? options.executionLease?.signal, context, input.verification ?? undefined, verificationInputs(input.verificationInputs));
+        if (options.processManager) {
+          return runManagedCommand(options.processManager, input.command, input.waitMs ?? Math.min(input.timeoutMs == null ? commandTimeoutMs : input.timeoutMs + 1_000, 30_000), signal, context?.continuationSignal ?? options.executionLease?.signal, context, input.verification ?? undefined, verificationInputs(input.verificationInputs), input.timeoutMs ?? undefined);
         }
         const ownedProcesses = options.executionLease ? undefined : new HostProcessScope(root);
         const observation = await beginCommandFileObservation(files, context?.requestContract?.requirements, context?.visibleTurnId);
@@ -737,7 +744,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           options.executionLease?.processes ?? ownedProcesses!,
           signal
         );
-          return { ...result, metadata: { ...result.metadata, command: input.command, cwd: root, verification: input.verification ?? undefined, verificationInputs: verificationInputs(input.verificationInputs), commandFileObservation: await finishCommandFileObservation(files, observation) } };
+          return { ...result, metadata: { ...result.metadata, command: input.command, cwd: await realpath(root), verification: input.verification ?? undefined, verificationInputs: verificationInputs(input.verificationInputs), commandFileObservation: await finishCommandFileObservation(files, observation) } };
         } finally { await ownedProcesses?.release(); }
       }
     }
@@ -1817,9 +1824,15 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return typeof error === "object" && error !== null && "code" in error;
 }
 
-async function runManagedCommand(manager: ProcessManager, command: string, waitMs: number, signal: AbortSignal, continuationSignal?: AbortSignal, context?: ToolExecutionContext, verification?: string | null, checkInputs?: string[]): Promise<ToolResult> {
-  const started = await manager.start(command, signal, { input: false, continuationSignal, requirements: context?.requestContract?.requirements, visibleTurnId: context?.visibleTurnId, verification: verification ?? undefined, verificationInputs: checkInputs });
-  const process = (await manager.wait(started.id, waitMs, signal))!;
+async function runManagedCommand(manager: ProcessManager, command: string, waitMs: number, signal: AbortSignal, continuationSignal?: AbortSignal, context?: ToolExecutionContext, verification?: string | null, checkInputs?: string[], timeoutMs?: number): Promise<ToolResult> {
+  const started = await manager.start(command, signal, { input: false, continuationSignal, requirements: context?.requestContract?.requirements, visibleTurnId: context?.visibleTurnId, verification: verification ?? undefined, verificationInputs: checkInputs, timeoutMs });
+  let process = (await manager.wait(started.id, waitMs, signal))!;
+  // Preserve legacy hard-deadline semantics: collect the stopped/exit receipt
+  // before returning. Only observation waits may hand off a running process.
+  while (timeoutMs !== undefined && process.status === "running") {
+    process = (await manager.wait(started.id, Math.min(timeoutMs + 1_000, 120_000), signal))!;
+  }
+  if (process.timedOut) process = (await manager.stop(process.id))!;
   const logs = manager.logs(process.id, { tailChars: 16_000 }) ?? [];
   const stdout = logs.filter(log => log.stream === "stdout").map(log => log.text).join("");
   const stderr = logs.filter(log => log.stream === "stderr").map(log => log.text).join("");
@@ -1835,10 +1848,10 @@ async function runManagedCommand(manager: ProcessManager, command: string, waitM
     metadata: {
       commandFileObservation: await manager.fileObservation(process.id),
       command, process, running, code: process.exitCode ?? null, signal: process.signal ?? null,
-      timedOut: false, cancelled: false,
+      timedOut: process.timedOut ?? false, timeoutMs, cancelled: process.status === "stopped" && !process.timedOut,
       _estacoda_context_summary: running
         ? `Command is still running as ${process.id}; its exit status has not been collected.`
-        : terminalContextSummary({ command, code: process.exitCode ?? null, timedOut: false, timeoutMs: waitMs, cancelled: false, stdout, stderr })
+        : terminalContextSummary({ command, code: process.exitCode ?? null, timedOut: process.timedOut ?? false, timeoutMs: timeoutMs ?? waitMs, cancelled: process.status === "stopped" && !process.timedOut, stdout, stderr })
     }
   };
 }

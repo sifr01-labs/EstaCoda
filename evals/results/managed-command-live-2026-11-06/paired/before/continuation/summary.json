@@ -1,0 +1,87 @@
+{
+  "arm": "before",
+  "test": "continuation",
+  "foregroundOutcome": "completed",
+  "elapsedMs": 324465,
+  "providerCalls": 20,
+  "inputTokens": 290388,
+  "outputTokens": 11556,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "partial",
+      "settlementDurationMs": 278780,
+      "steps": [
+        {
+          "id": "step_eca686e8-67c7-4453-bffb-b53c95777132",
+          "title": "Delegated work",
+          "role": "worker",
+          "status": "failed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "failed",
+              "failure": {
+                "class": "evidence-contract-unsatisfied",
+                "message": "Execution stopped (normal). Research evidence needs correction: repository-evidence. Cite evidence observed with the assigned tools; obtain missing evidence or explicitly report the unresolved gap. Inspect the preserved draft.",
+                "retryable": false,
+                "uncertainSideEffects": false
+              },
+              "providerCalls": 16,
+              "totalTokens": 273101
+            }
+          ],
+          "results": [
+            {
+              "disposition": "diagnostic",
+              "bytes": 13861,
+              "sha256": "sha256:31f368ce4d9cd066fb14ca5ec8c59c4d9467f4a9232e77610a6c07254af0e044"
+            }
+          ]
+        },
+        {
+          "id": "step_ce2ff7e1-2d18-439e-bfa6-ee9f7dae887f",
+          "title": "Synthesize delegated results",
+          "role": "synthesis",
+          "status": "skipped",
+          "tokenLimit": 1000000,
+          "attempts": [],
+          "results": []
+        }
+      ]
+    }
+  ],
+  "reports": [],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "pendingReviews": 0,
+    "drafts": [],
+    "observations": [
+      {
+        "sessionId": "72e3fd69-ef19-4708-b4e1-58c7a19b044e",
+        "outcome": "partial",
+        "settledTasks": {
+          "id": "11b636155313b6aa7e2950d094bac7e9fa8dab985cbd142292eac1b6e658191b",
+          "taskIds": [
+            "task_cd1aea51-b84f-48cb-9536-36dc47fd9273"
+          ],
+          "failures": [
+            "evidence-contract-unsatisfied"
+          ],
+          "acceptedResults": 0,
+          "diagnosticResults": 1,
+          "results": [
+            {
+              "taskId": "task_cd1aea51-b84f-48cb-9536-36dc47fd9273",
+              "resultId": "ea705141-a08f-462f-875b-b1437707065c",
+              "disposition": "diagnostic"
+            }
+          ]
+        },
+        "timestamp": "2026-11-06T10:24:09.844Z"
+      }
+    ]
+  }
+}

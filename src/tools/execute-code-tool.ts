@@ -85,6 +85,7 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
       try { await options.executionLease?.content.assertMaterialized(); }
       catch (error) { return errorResult(error instanceof Error ? error.message : "Editor content is not materialized."); }
       const files = options.executionLease?.files ?? new HostWorkspaceFiles(options.workspaceRoot);
+      const cwd = await files.realpath(options.executionLease?.workspaceRoot ?? options.workspaceRoot);
       const observation = await beginCommandFileObservation(files, context?.requestContract?.requirements, context?.visibleTurnId);
       const result = await runCode({
         signal: context?.signal,
@@ -146,7 +147,7 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
           return execution.result;
         }
       });
-      return { ...result, metadata: { ...result.metadata, cwd: options.executionLease?.workspaceRoot ?? options.workspaceRoot, verification: input.verification ?? undefined, verificationInputs: verificationInputs(input.verificationInputs), commandFileObservation: await finishCommandFileObservation(files, observation) } };
+      return { ...result, metadata: { ...result.metadata, cwd, verification: input.verification ?? undefined, verificationInputs: verificationInputs(input.verificationInputs), commandFileObservation: await finishCommandFileObservation(files, observation) } };
     }
   };
 }

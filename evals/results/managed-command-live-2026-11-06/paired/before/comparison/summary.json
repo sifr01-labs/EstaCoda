@@ -1,0 +1,182 @@
+{
+  "arm": "before",
+  "test": "comparison",
+  "foregroundOutcome": "partially_completed",
+  "elapsedMs": 582986,
+  "providerCalls": 70,
+  "inputTokens": 1712758,
+  "outputTokens": 24397,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "partial",
+      "settlementDurationMs": 489898,
+      "steps": [
+        {
+          "id": "step_48a06a12-3eec-48cb-9261-ec3e612ef2de",
+          "title": "Delegated work 1",
+          "role": "worker",
+          "status": "failed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "failed",
+              "failure": {
+                "class": "evidence-contract-unsatisfied",
+                "message": "Execution stopped (normal). Research evidence needs correction: repository-evidence. Cite evidence observed with the assigned tools; obtain missing evidence or explicitly report the unresolved gap. Inspect the preserved draft.",
+                "retryable": false,
+                "uncertainSideEffects": false
+              },
+              "providerCalls": 16,
+              "totalTokens": 457794
+            }
+          ],
+          "results": [
+            {
+              "disposition": "diagnostic",
+              "bytes": 11646,
+              "sha256": "sha256:dbc9c77d1784cfb73ec2a6999832d84d4010c7a59881d1bc6e0a2e4815d34025"
+            }
+          ]
+        },
+        {
+          "id": "step_16bdb7a3-7342-4bd0-b187-c92f9143f5fb",
+          "title": "Delegated work 2",
+          "role": "worker",
+          "status": "failed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "failed",
+              "failure": {
+                "class": "evidence-contract-unsatisfied",
+                "message": "Execution stopped (normal). Research evidence needs correction: repository-evidence. Cite evidence observed with the assigned tools; obtain missing evidence or explicitly report the unresolved gap. Inspect the preserved draft.",
+                "retryable": false,
+                "uncertainSideEffects": false
+              },
+              "providerCalls": 21,
+              "totalTokens": 543081
+            }
+          ],
+          "results": [
+            {
+              "disposition": "diagnostic",
+              "bytes": 11837,
+              "sha256": "sha256:38d90f8fa29e45697cbc8eb8f19e8da5f62ee35a1a7acd35f0f5ffac63288b64"
+            }
+          ]
+        },
+        {
+          "id": "step_505d47a8-75e7-43d7-8c6b-f42f6d9c6a6d",
+          "title": "Delegated work 3",
+          "role": "worker",
+          "status": "failed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "failed",
+              "failure": {
+                "class": "evidence-contract-unsatisfied",
+                "message": "Execution stopped (normal). Declared checks remain unresolved: [\"estacoda-regressions\"]. Verify those requirements on the current result using an authorized command and reuse the exact verification label. A missing interpreter, crash, failed exit, or stale check is not a passing validation. Reading files or passing a differently named check does not settle these requirements. Do not retry denied actions, bypass permissions, or rerun uncertain side effects. If blocked, report what remains unverif",
+                "retryable": false,
+                "uncertainSideEffects": false
+              },
+              "providerCalls": 18,
+              "totalTokens": 543194
+            }
+          ],
+          "results": [
+            {
+              "disposition": "diagnostic",
+              "bytes": 14812,
+              "sha256": "sha256:7f68f310903578e243fc24a3ccce1f5e653f30ce36b78d04bebd9e9c55fa29b1"
+            }
+          ]
+        },
+        {
+          "id": "step_7ce9dcef-247f-4cff-8b7d-f7138166ff38",
+          "title": "Synthesize delegated results",
+          "role": "synthesis",
+          "status": "skipped",
+          "tokenLimit": 1000000,
+          "attempts": [],
+          "results": []
+        },
+        {
+          "id": "step_1a603e3f-ba71-44b3-851b-13aae96746b8",
+          "title": "Save and verify research report",
+          "role": "report-delivery",
+          "status": "skipped",
+          "tokenLimit": 1000000,
+          "attempts": [],
+          "results": []
+        }
+      ]
+    }
+  ],
+  "reports": [],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "pendingReviews": 0,
+    "drafts": [
+      {
+        "status": "proposed",
+        "attempts": 1,
+        "proposalCreated": true
+      }
+    ],
+    "observations": [
+      {
+        "sessionId": "child_fe432eef-26b2-4c57-a1d3-89bcf3127651",
+        "outcome": "partial",
+        "timestamp": "2026-11-06T10:13:14.106Z"
+      },
+      {
+        "sessionId": "child_80f986c2-8171-4633-aad9-101e6457e6a6",
+        "outcome": "partial",
+        "timestamp": "2026-11-06T10:13:45.512Z"
+      },
+      {
+        "sessionId": "child_ad7567b0-2802-4335-9793-d42e12609878",
+        "outcome": "partial",
+        "timestamp": "2026-11-06T10:18:25.295Z"
+      },
+      {
+        "sessionId": "23f24e18-df73-4c3d-a5a4-7e9ca5290848",
+        "outcome": "partial",
+        "settledTasks": {
+          "id": "a057159bf82858aa695d62d7442dbd02a14517d8ee2192e21fb805425a36ad10",
+          "taskIds": [
+            "task_3b614aed-90da-4b12-b492-c3478d9e9d3e"
+          ],
+          "failures": [
+            "evidence-contract-unsatisfied"
+          ],
+          "acceptedResults": 0,
+          "diagnosticResults": 3,
+          "results": [
+            {
+              "taskId": "task_3b614aed-90da-4b12-b492-c3478d9e9d3e",
+              "resultId": "f26e0daf-e035-4e65-84d2-1ce54f2030bb",
+              "disposition": "diagnostic"
+            },
+            {
+              "taskId": "task_3b614aed-90da-4b12-b492-c3478d9e9d3e",
+              "resultId": "ee43a9c1-026b-4194-9097-629acd7fe384",
+              "disposition": "diagnostic"
+            },
+            {
+              "taskId": "task_3b614aed-90da-4b12-b492-c3478d9e9d3e",
+              "resultId": "67cbfe18-2503-4f2d-a01e-4dacc706fed2",
+              "disposition": "diagnostic"
+            }
+          ]
+        },
+        "findings": [],
+        "timestamp": "2026-11-06T10:18:25.334Z"
+      }
+    ]
+  }
+}

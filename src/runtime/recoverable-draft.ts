@@ -8,12 +8,16 @@ export function recoverableDraft(text: string, executions: readonly ToolExecutio
   if (!text.trim()) return undefined;
   if (executions.some(call => call.decision !== "allow") &&
       !executions.some(call => call.decision === "allow" && call.result?.ok === true)) return undefined;
-  // Match the worker disclosure boundary: privileged output and uncertain effects
-  // cannot be republished merely by adding a disclaimer.
-  if (executions.some(call => call.settlement?.sideEffectState === "possible" ||
+  // Local execution uncertainty blocks replay/acceptance, not sanitized disclosure.
+  // Do not infer disclosure authority for privileged activity or missing receipts.
+  if (executions.some(call =>
       call.decision === "allow" && !["read-only-local", "read-only-network"].includes(call.riskClass) &&
       !(call.riskClass === "workspace-write" && call.settlement !== undefined &&
-        ["none", "confirmed"].includes(call.settlement.sideEffectState)))) return undefined;
+        (["none", "confirmed"].includes(call.settlement.sideEffectState) ||
+          call.settlement.sideEffectState === "possible" && call.settlement.dispatchState === "finished")))) return undefined;
   const sanitized = redactSensitiveText(inspectPlaintextCredentials(stripInlineReasoning(text)).redactedText).trim();
-  return sanitized || undefined;
+  if (!sanitized) return undefined;
+  return executions.some(call => call.settlement?.sideEffectState === "possible")
+    ? `Unaccepted draft — local execution effects remain uncertain. This text does not establish successful completion or authorize retry.\n\n${sanitized}`
+    : sanitized;
 }

@@ -1,0 +1,252 @@
+[
+  {
+    "sessionId": "child_641e292e-3da8-4e1e-9011-b63970a97eea",
+    "callId": "tool-call-13dcc2e87cf7359084e40dc2",
+    "tool": "terminal.run",
+    "input": {
+      "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/tasks/task-scheduler.test.ts src/delegation/durable-delegation-service.test.ts src/security/dispatch-authorization.test.ts src/skills/skill-learning.test.ts src/providers/provider-executor-fallback.test.ts --maxWorkers=1",
+      "verificationInputs": [
+        "src",
+        "vitest.node.config.ts",
+        "package.json",
+        "node_modules",
+        "tsconfig.json"
+      ],
+      "verification": "estacoda-runtime-discriminating-tests",
+      "waitMs": 1000,
+      "timeoutMs": null
+    },
+    "ok": true,
+    "process": {
+      "verification": "estacoda-runtime-discriminating-tests",
+      "verificationInputs": [
+        "src",
+        "vitest.node.config.ts",
+        "package.json",
+        "node_modules",
+        "tsconfig.json"
+      ],
+      "id": "proc_pnnpbr9s",
+      "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/tasks/task-scheduler.test.ts src/delegation/durable-delegation-service.test.ts src/security/dispatch-authorization.test.ts src/skills/skill-learning.test.ts src/providers/provider-executor-fallback.test.ts --maxWorkers=1",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "running",
+      "startedAt": "2026-11-06T10:27:06.857Z",
+      "updatedAt": "2026-11-06T10:27:06.857Z"
+    },
+    "running": true,
+    "code": null,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "f954487f0cc8f1d1d9c0b9db486e5f9a24baf94d496fa34f3669110194a7b79a",
+    "contentTail": "Command is still running as proc_pnnpbr9s. Use process.logs to wait for completion; process.stop cancels it. Do not restart the command.\n\nstarted pid 15317\n\n RUN  v4.1.6 <BENCHMARK_ROOT>/after/comparison/workspace\n\n ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > admits an explicit report commitment and rejects prose-only or unsafe destinations 116ms\n\n ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > previews and admits inherited workspace execution under runtime policy without making it retry safe 93ms"
+  },
+  {
+    "sessionId": "child_641e292e-3da8-4e1e-9011-b63970a97eea",
+    "callId": "tool-call-74d47e155818bc2e56dd4494",
+    "tool": "process.logs",
+    "input": {
+      "id": "proc_pnnpbr9s",
+      "tailChars": 24000,
+      "waitMs": 1000
+    },
+    "ok": true,
+    "process": {
+      "verification": "estacoda-runtime-discriminating-tests",
+      "verificationInputs": [
+        "src",
+        "vitest.node.config.ts",
+        "package.json",
+        "node_modules",
+        "tsconfig.json"
+      ],
+      "id": "proc_pnnpbr9s",
+      "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/tasks/task-scheduler.test.ts src/delegation/durable-delegation-service.test.ts src/security/dispatch-authorization.test.ts src/skills/skill-learning.test.ts src/providers/provider-executor-fallback.test.ts --maxWorkers=1",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "running",
+      "startedAt": "2026-11-06T10:27:06.857Z",
+      "updatedAt": "2026-11-06T10:27:06.857Z"
+    },
+    "contentSha256": "d57821be1d558c16bf52914bb085b90672cf38ab55986c382237129077b0a667",
+    "contentTail": " redefining the root monetary scope 88ms\n[stdout]  ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > rolls a reservation back when the child graph cannot be persisted 91ms\n[stdout]  ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > serializes competing child reservations so only one can consume the remaining ceiling 90ms\n[stdout]  ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > counts descendant usage in the parent projection and rejects child settlement above the ancestor ceiling 98ms\n[stdout]  ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > budgets two worker waves plus synthesis when six workers have concurrency three 88ms\n[stdout]  ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > does not let a child Task expand the root Task's live concurrency 93ms\n[stdout]  ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > does not dispatch a descendant after its ancestor wall-clock ceiling expires 97ms\n[stdout]  ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > actively aborts descendant execution at the remaining ancestor deadline 96ms\n[stdout]  ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > rejects runtime children when the active parent Step policy forbids them 88ms\n[stdout]  ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > fails closed for untrusted workspaces and overlong objectives 89ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > keeps a safe failed worker recoverable without accepting a draft or skipping delivery 116ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > keeps a safe failed synthesis recoverable without accepting a draft or skipping delivery 99ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > bounds exception diagnostics and excludes messages and absolute paths 88ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > notifies learning only after Task settlement and result publication; observer failure cannot reject delivery 97ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > runs dependencies in order and settles the Task only after durable result acceptance 102ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > confirms durable dispatch before Attempt execution settles 107ms"
+  },
+  {
+    "sessionId": "child_641e292e-3da8-4e1e-9011-b63970a97eea",
+    "callId": "tool-call-0f0cb4ff9a5d775f3dc105dd",
+    "tool": "process.logs",
+    "input": {
+      "id": "proc_pnnpbr9s",
+      "tailChars": 21000,
+      "waitMs": 1000
+    },
+    "ok": true,
+    "process": {
+      "verification": "estacoda-runtime-discriminating-tests",
+      "verificationInputs": [
+        "src",
+        "vitest.node.config.ts",
+        "package.json",
+        "node_modules",
+        "tsconfig.json"
+      ],
+      "id": "proc_pnnpbr9s",
+      "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/tasks/task-scheduler.test.ts src/delegation/durable-delegation-service.test.ts src/security/dispatch-authorization.test.ts src/skills/skill-learning.test.ts src/providers/provider-executor-fallback.test.ts --maxWorkers=1",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "running",
+      "startedAt": "2026-11-06T10:27:06.857Z",
+      "updatedAt": "2026-11-06T10:27:06.857Z"
+    },
+    "contentSha256": "53bc8fc4fd32c53546eecca11d7337b72b0ade1b59a1cdea685acbdb4034923d",
+    "contentTail": "ask-scheduler.test.ts > TaskScheduler > stops renewal at the last successful lease expiry after heartbeat writes remain stale 103ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > checkpoints and links durable worker progress under the Attempt fence 155ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > projects the ordered primary-result lifecycle through parent delivery 108ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > reconciles an expired retry-safe Attempt after restart and retries only through policy 103ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > allows lease recovery plus synthesis after one phase but within a two-phase Task deadline 107ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > rejects settlement beyond the derived Task deadline without accepting its output 93ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > pauses an expired started unknown Attempt until an operator retries it 97ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > pauses an expired started non_idempotent Attempt until an operator retries it 96ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > reuses a queued crash-boundary Attempt instead of creating a duplicate dispatch 95ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > refuses result settlement after lease expiry and reconciles it on the next pass 114ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > waits for an eligible host and pauses before exceeding a zero provider-call execution limit 130ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > continues eligible independent work before waiting for a missing executor 140ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > does not pause active work while a provider-call reservation is still settling 139ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > durably pauses for approval, resumes the same Attempt with a higher fence, and preserves usage 161ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > keeps a Task waiting until every parallel approval is resolved 146ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > fails a parallel-approval Task without leaving sibling execution state live after denial 144ms\n[stdout]  ✓ src/tasks/task-scheduler.test.ts > TaskScheduler > pauses on an exact spending denial while preserving completed Results 131ms"
+  },
+  {
+    "sessionId": "child_641e292e-3da8-4e1e-9011-b63970a97eea",
+    "callId": "tool-call-c89f37eabc42a6bff0c703f6",
+    "tool": "process.logs",
+    "input": {
+      "id": "proc_pnnpbr9s",
+      "tailChars": 6500,
+      "waitMs": 1000
+    },
+    "ok": true,
+    "process": {
+      "verification": "estacoda-runtime-discriminating-tests",
+      "verificationInputs": [
+        "src",
+        "vitest.node.config.ts",
+        "package.json",
+        "node_modules",
+        "tsconfig.json"
+      ],
+      "id": "proc_pnnpbr9s",
+      "command": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/tasks/task-scheduler.test.ts src/delegation/durable-delegation-service.test.ts src/security/dispatch-authorization.test.ts src/skills/skill-learning.test.ts src/providers/provider-executor-fallback.test.ts --maxWorkers=1",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "exited",
+      "startedAt": "2026-11-06T10:27:06.857Z",
+      "updatedAt": "2026-11-06T10:27:18.386Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    "contentSha256": "d0e66385566d36605948852dac81a49407ff4e41cfe1dcd826459b297bc705df",
+    "contentTail": " behavior > eligible failure class server triggers fallback: true 0ms\n ✓ src/providers/provider-executor-fallback.test.ts > ProviderExecutor fallback behavior > eligible failure class model-unavailable triggers fallback: true 0ms\n ✓ src/providers/provider-executor-fallback.test.ts > ProviderExecutor fallback behavior > eligible failure class unknown triggers fallback: true 0ms\n ✓ src/providers/provider-executor-fallback.test.ts > ProviderExecutor fallback behavior > eligible failure class timeout triggers fallback: true 0ms\n ✓ src/providers/provider-executor-fallback.test.ts > ProviderExecutor fallback behavior > eligible failure class incomplete-stream triggers fallback: true 0ms\n ✓ src/providers/provider-executor-fallback.test.ts > ProviderExecutor fallback behavior > eligible failure class unsupported triggers fallback: false 0ms\n ✓ src/providers/provider-executor-fallback.test.ts > ProviderExecutor fallback behavior > falls back on auth error when explicit fallback chain exists 0ms\n ✓ src/providers/provider-executor-fallback.test.ts > ProviderExecutor fallback behavior > blocks on auth error when no fallback chain exists 0ms\n ✓ src/providers/provider-executor-fallback.test.ts > ProviderExecutor fallback behavior > does not fallback on cancellation 53ms\n ✓ src/providers/provider-executor-fallback.test.ts > ProviderExecutor fallback behavior > blocks auth fallback when same provider and same apiKeyEnv 0ms\n ✓ src/providers/provider-executor-fallback.test.ts > ProviderExecutor fallback behavior > blocks auth fallback when same provider and both use pool 0ms\n ✓ src/providers/provider-executor-fallback.test.ts > ProviderExecutor fallback behavior > allows auth fallback when same provider but different apiKeyEnv 0ms\n ✓ src/providers/provider-executor-fallback.test.ts > ProviderExecutor fallback behavior > all fallbacks fail -> attempts length is complete and final error is clear 0ms\n[stdout]  ✓ src/security/dispatch-authorization.test.ts > fences an assessed grant across revoke and identical regrant, while fresh work can proceed 17ms\n[stdout]  ✓ src/security/dispatch-authorization.test.ts > preserves covered dispatch and pending grants across unrelated changes, but fences relevant revocation 5ms\n[stdout] \n[stdout]  Test Files  5 passed (5)\n[stdout]       Tests  172 passed (172)\n[stdout]    Start at  10:27:07\n[stdout]    Duration  11.25s (transform 378ms, setup 28ms, import 544ms, tests 10.36s, environment 0ms)\n[stdout] \n[system] closed with code 0 signal null"
+  },
+  {
+    "sessionId": "child_85a3398f-8142-4991-abfb-ae552470342e",
+    "callId": "tool-call-20026b594305ec16de03d23a",
+    "tool": "terminal.run",
+    "input": {
+      "command": "cd upstream/superagent && ./node_modules/.bin/vitest run tests/policy.spec.ts tests/core-engine.spec.ts tests/outbox.spec.ts --maxWorkers=1",
+      "verificationInputs": [
+        "."
+      ],
+      "verification": "superagent-policy-recovery",
+      "waitMs": 1000,
+      "timeoutMs": null
+    },
+    "ok": true,
+    "process": {
+      "verification": "superagent-policy-recovery",
+      "verificationInputs": [
+        "."
+      ],
+      "id": "proc_re78i2l4",
+      "command": "cd upstream/superagent && ./node_modules/.bin/vitest run tests/policy.spec.ts tests/core-engine.spec.ts tests/outbox.spec.ts --maxWorkers=1",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "running",
+      "startedAt": "2026-11-06T10:24:24.444Z",
+      "updatedAt": "2026-11-06T10:24:24.444Z"
+    },
+    "running": true,
+    "code": null,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "40f17da83ca0563ea4fa98ac133104fd0fe7584445a128e7697201b783fd9f3b",
+    "contentTail": "Command is still running as proc_re78i2l4. Use process.logs to wait for completion; process.stop cancels it. Do not restart the command.\n\nstarted pid 14186\n\n RUN  v4.1.8 <BENCHMARK_ROOT>/after/comparison/workspace/upstream/superagent\n\n ✓ tests/core-engine.spec.ts (113 tests) 61ms\n\nstderr: (node:14194) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n\n ✓ tests/outbox.spec.ts (2 tests) 49ms"
+  },
+  {
+    "sessionId": "child_85a3398f-8142-4991-abfb-ae552470342e",
+    "callId": "tool-call-2d2e0100489c833d5bc41f45",
+    "tool": "process.logs",
+    "input": {
+      "id": "proc_re78i2l4",
+      "tailChars": 6000,
+      "waitMs": 1000
+    },
+    "ok": true,
+    "process": {
+      "verification": "superagent-policy-recovery",
+      "verificationInputs": [
+        "."
+      ],
+      "id": "proc_re78i2l4",
+      "command": "cd upstream/superagent && ./node_modules/.bin/vitest run tests/policy.spec.ts tests/core-engine.spec.ts tests/outbox.spec.ts --maxWorkers=1",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "exited",
+      "startedAt": "2026-11-06T10:24:24.444Z",
+      "updatedAt": "2026-11-06T10:24:25.521Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    "contentSha256": "a9f6dcb3279cf0e4295f556ab70d51a2986f64d31fd239e2d887abec2e8e3a9f",
+    "contentTail": "Process proc_re78i2l4: exited, exit code 0.\n[system] started pid 14186\n[stdout] \n[stdout]  RUN  v4.1.8 <BENCHMARK_ROOT>/after/comparison/workspace/upstream/superagent\n[stdout] \n[stdout]  ✓ tests/core-engine.spec.ts (113 tests) 61ms\n[stderr] (node:14194) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n[stdout]  ✓ tests/outbox.spec.ts (2 tests) 49ms\n[stdout]  ✓ tests/policy.spec.ts (328 tests) 26ms\n[stdout] \n[stdout]  Test Files  3 passed (3)\n[stdout]       Tests  443 passed (443)\n[stdout]    Start at  10:24:24\n[stdout]    Duration  820ms (transform 295ms, setup 0ms, import 502ms, tests 136ms, environment 0ms)\n[stdout] \n[system] closed with code 0 signal null"
+  },
+  {
+    "sessionId": "child_aaa2b2af-eba0-4883-9548-b38d33e8dd1e",
+    "callId": "tool-call-739a4a97de9c6fa00a4a6f0e",
+    "tool": "terminal.run",
+    "input": {
+      "command": "cd upstream/harness && node --version && ./node_modules/.bin/vitest run packages/sandbox/sandbox-policy/tests/policy.spec.ts packages/core/session/tests/repair.spec.ts --maxWorkers=1",
+      "verificationInputs": [
+        "."
+      ],
+      "verification": "harness-policy-repair",
+      "waitMs": 1000,
+      "timeoutMs": null
+    },
+    "ok": true,
+    "process": {
+      "verification": "harness-policy-repair",
+      "verificationInputs": [
+        "."
+      ],
+      "id": "proc_ipitrmtz",
+      "command": "cd upstream/harness && node --version && ./node_modules/.bin/vitest run packages/sandbox/sandbox-policy/tests/policy.spec.ts packages/core/session/tests/repair.spec.ts --maxWorkers=1",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "running",
+      "startedAt": "2026-11-06T10:24:18.495Z",
+      "updatedAt": "2026-11-06T10:24:18.495Z"
+    },
+    "running": true,
+    "code": null,
+    "timedOut": false,
+    "cancelled": false,
+    "contentSha256": "f849b69c51239a60ae732839b2f571a5a65a0efac0cdfa1ebb9249e61292b9ea",
+    "contentTail": "Command is still running as proc_ipitrmtz. Use process.logs to wait for completion; process.stop cancels it. Do not restart the command.\n\nstarted pid 14083\n\nv24.14.1\n\nstderr: The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n\nstderr: The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n\nstderr: The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n\n RUN  v4.1.11 <BENCHMARK_ROOT>/after/comparison/workspace/upstream/harness\n\n ✓ |thread-safe| packages/sandbox/sandbox-policy/tests/policy.spec.ts (24 tests) 24ms\n\n ✓ |thread-safe| packages/core/session/tests/repair.spec.ts (32 tests) 6ms\n\n Test Files  2 passed (2)\n\n      Tests  56 passed (56)\n   Start at  10:24:18\n   Duration  496ms (transform 249ms, setup 37ms, import 308ms, tests 30ms, environment 0ms)"
+  },
+  {
+    "sessionId": "child_aaa2b2af-eba0-4883-9548-b38d33e8dd1e",
+    "callId": "tool-call-ade124ccca6d692f482a0b37",
+    "tool": "process.logs",
+    "input": {
+      "id": "proc_ipitrmtz",
+      "tailChars": 2000,
+      "waitMs": 0
+    },
+    "ok": true,
+    "process": {
+      "verification": "harness-policy-repair",
+      "verificationInputs": [
+        "."
+      ],
+      "id": "proc_ipitrmtz",
+      "command": "cd upstream/harness && node --version && ./node_modules/.bin/vitest run packages/sandbox/sandbox-policy/tests/policy.spec.ts packages/core/session/tests/repair.spec.ts --maxWorkers=1",
+      "cwd": "<BENCHMARK_ROOT>/after/comparison/workspace",
+      "status": "exited",
+      "startedAt": "2026-11-06T10:24:18.495Z",
+      "updatedAt": "2026-11-06T10:24:19.500Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    "contentSha256": "83188a37ab8b86fe73e30e7eaabf95d1350f0878cae23321c014aa34833a5696",
+    "contentTail": "Process proc_ipitrmtz: exited, exit code 0.\n[system] started pid 14083\n[stdout] v24.14.1\n[stderr] The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n[stderr] The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n[stderr] The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n[stdout] \n[stdout]  RUN  v4.1.11 <BENCHMARK_ROOT>/after/comparison/workspace/upstream/harness\n[stdout]  ✓ |thread-safe| packages/sandbox/sandbox-policy/tests/policy.spec.ts (24 tests) 24ms\n[stdout]  ✓ |thread-safe| packages/core/session/tests/repair.spec.ts (32 tests) 6ms\n[stdout] \n[stdout]  Test Files  2 passed (2)\n[stdout]       Tests  56 passed (56)\n   Start at  10:24:18\n   Duration  496ms (transform 249ms, setup 37ms, import 308ms, tests 30ms, environment 0ms)\n[stdout] \n[system] closed with code 0 signal null"
+  }
+]

@@ -628,6 +628,35 @@ describe("TaskScheduler", () => {
     });
   });
 
+  it("drains independent read-only work while retaining the uncertain step and blocking writes", async () => {
+    const unsafe = makeStep("uncertain", 0, { idempotency: "non_idempotent", retryPolicy: { ...makeStep("policy", 0).retryPolicy, maxAttempts: 1 } });
+    const readAuthority = { ...authorityPolicy(), allowedTools: ["task.result.read"], riskClassPolicy: riskPolicy({ "read-only-local": "runtime_policy" }) };
+    const read = makeStep("independent-read", 1, { authorityPolicy: readAuthority });
+    const followup = makeStep("read-followup", 2, { authorityPolicy: readAuthority, dependsOn: [read.id] });
+    const write = makeStep("independent-write", 3);
+    const dependent = makeStep("dependent-read", 4, { authorityPolicy: readAuthority, dependsOn: [unsafe.id] });
+    store.createTaskGraph(makeGraph([unsafe, read, followup, write, dependent]));
+    const executed: string[] = [];
+    const scheduler = makeScheduler(new FakeTaskStepExecutor(input => {
+      executed.push(input.step.id);
+      return input.step.id === unsafe.id
+        ? { outcome: "failed", failure: { class: "tool-error", message: "Interrupted command", retryable: false, uncertainSideEffects: true }, diagnosticResults: [{ kind: "text", content: "Unaccepted observations; effects uncertain." }] }
+        : { outcome: "succeeded", results: [{ kind: "text", content: "Independent observed evidence." }] };
+    }), { maxProfileConcurrentAttempts: 1 });
+    await scheduler.runOnce();
+    expect(store.getTask("task-alpha")?.status).toBe("running");
+    expect(store.getStep(unsafe.id)?.status).toBe("waiting_for_input");
+    await scheduler.runOnce();
+    await scheduler.runOnce();
+    await scheduler.runOnce();
+    expect(executed).toEqual([unsafe.id, read.id, followup.id]);
+    expect(store.getTask("task-alpha")?.status).toBe("waiting_for_input");
+    expect(store.getStep(write.id)?.status).toBe("ready");
+    expect(store.getStep(dependent.id)?.status).toBe("pending");
+    expect(store.listResults("task-alpha").filter(r => r.disposition === "diagnostic")).toHaveLength(1);
+    expect(store.listAttempts("task-alpha", unsafe.id)).toHaveLength(1);
+  });
+
   it("bounds automatic accounting recovery to one safe retry", async () => {
     const step = makeStep("accounting", 0, { idempotency: "retry_safe", retryPolicy: {
       maxAttempts: 4, initialBackoffMs: 0, backoffMultiplier: 1, maxBackoffMs: 0,
@@ -1016,14 +1045,18 @@ describe("TaskScheduler", () => {
     expect(store.listResults("task-alpha")).toHaveLength(1);
   });
 
-  it("actively aborts an Attempt at its earliest wall-clock deadline and preserves late output as diagnostic", async () => {
+  it.each([false, true])("actively aborts at the wall-clock deadline and retains diagnostics and uncertainty (uncertain=%s)", async uncertain => {
     vi.useFakeTimers();
     try {
       store.createTaskGraph(makeGraph([makeStep("deadline", 0, {
+        ...(uncertain ? { idempotency: "non_idempotent" as const, retryPolicy: { ...makeStep("policy", 0).retryPolicy, maxAttempts: 1 } } : {}),
         executionLimits: { maxProviderCalls: 5, maxTotalTokens: 50_000, maxWallClockMs: 50 }
       })], { maxWallClockMs: 1_000 }));
       const executor = new FakeTaskStepExecutor(({ signal }) => new Promise((resolve) => {
-        signal.addEventListener("abort", () => resolve({
+        signal.addEventListener("abort", () => resolve(uncertain ? {
+          outcome: "failed", failure: { class: "tool-error", message: "Interrupted local command", retryable: false, uncertainSideEffects: true },
+          diagnosticResults: [{ kind: "text", content: "Unaccepted observations; effects uncertain." }]
+        } : {
           outcome: "succeeded",
           results: [{ kind: "text", content: "completed after the deadline" }]
         }), { once: true });
@@ -1040,9 +1073,9 @@ describe("TaskScheduler", () => {
       expect(executor.executions[0]?.signal.aborted).toBe(true);
       expect(store.listAttempts("task-alpha")[0]).toMatchObject({
         status: "failed",
-        failure: { class: "execution-limit-exceeded" }
+        failure: { class: "execution-limit-exceeded", uncertainSideEffects: uncertain }
       });
-      expect(store.getStep("step-deadline")?.status).toBe("failed");
+      expect(store.getStep("step-deadline")?.status).toBe(uncertain ? "waiting_for_input" : "failed");
       expect(store.listResults("task-alpha")).toEqual([
         expect.objectContaining({ disposition: "diagnostic", status: "available" })
       ]);

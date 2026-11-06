@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "deferredTurns": [
+    {
+      "id": "09753fee83398bfd141ad3c45bc11fdc42147f2940d79081a0c2b5b65a1f8b66",
+      "profileId": "default",
+      "sessionId": "4d4eb760-68e5-422e-89f8-5e68a05cd216",
+      "taskIds": [
+        "task_b0e66160-6855-455d-94f7-c2175a399114"
+      ],
+      "promptSummary": "Review EstaCoda's real command completion and task-result summary implementations. Delegate a repository research worker with file.read, terminal.run and process.logs access. The paths are already known: src/runtime/command-completion-checks.ts, src/utils/task-result-summary.ts and their corresponding .test.ts files. Read those files directly; no discovery search is needed. Have the worker execute both existing test files with vitest.node.config.ts. Keep the initial command observation wait short (around one second) while allowing the tests to finish; collect the final exit status without restarting the same test command. Return a substantial source-cited assessment and actual test results. Do not edit source or tests. Then synthesize the worker's findings, explicitly disclosing any missing coverage",
+      "promptHash": "ea102e52b4a16783"
+    }
+  ],
+  "pendingReviews": [
+    {
+      "id": "fdf089e2-30a2-4866-98b1-7afb18c17b33",
+      "profileId": "default",
+      "sessionId": "4d4eb760-68e5-422e-89f8-5e68a05cd216",
+      "workspaceIdentityHash": "cb7bdd6dd14d5a8e7e129beb69d5d02ad7fa24b2ff533bce59b20c210931739b"
+    }
+  ],
+  "records": []
+}

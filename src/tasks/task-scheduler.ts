@@ -17,6 +17,7 @@ import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
 import { providerSpendDenialMessage } from "../providers/provider-spend-policy.js";
 import {
   TASK_GRAPH_LIMITS,
+  TASK_TOOL_RISK_CLASSES,
   isTerminalTaskAttemptStatus,
   isTerminalTaskStatus,
   isTerminalTaskStepStatus
@@ -297,7 +298,7 @@ export class TaskScheduler {
       let missingExecutor = false;
       let hasEligibleExecutor = false;
       for (const step of steps) {
-        if (step.status !== "ready") continue;
+        if (step.status !== "ready" || !canDispatchAfterUncertainty(this.#store, task, step)) continue;
         const executor = this.#resolveExecutor(task, step);
         if (executor === undefined || executor.kind !== step.executor.kind) {
           missingExecutor = true;
@@ -1025,6 +1026,7 @@ export class TaskScheduler {
       const currentTask = store.getTask(task.id);
       const currentStep = store.getStep(step.id);
       if (currentTask?.status !== "running" || currentStep?.status !== "ready" ||
+          !canDispatchAfterUncertainty(store, currentTask, currentStep) ||
           !isCurrentTaskHostDispatchGrant(
             store,
             currentTask,
@@ -1075,6 +1077,7 @@ export class TaskScheduler {
       const step = store.getStep(stepId);
       const attempt = store.getAttempt(attemptId);
       if (task?.status !== "running" || step?.status !== "ready" || attempt?.status !== "queued" ||
+          !canDispatchAfterUncertainty(store, task, step) ||
           !isCurrentTaskHostDispatchGrant(
             store,
             task,
@@ -1955,6 +1958,10 @@ export class TaskScheduler {
     }));
     const currentTask = store.getTask(task.id);
     if (currentTask?.status !== "running") return;
+    // Drain only independent work whose enforced authority forbids mutations and
+    // child spawning. Shared-workspace execution and dependent work stay blocked.
+    if (reasonCode === "uncertain-side-effects" && currentTask.activePlanRevisionId &&
+        hasIndependentReadWork(store.listSteps(task.id, currentTask.activePlanRevisionId))) return;
     store.updateTask({
       ...currentTask,
       status: "waiting_for_input",
@@ -2165,6 +2172,12 @@ export class TaskScheduler {
       const task = store.getTask(taskId);
       if (task === null || task.status !== "running" || task.activePlanRevisionId === undefined) return;
       const steps = store.listSteps(task.id, task.activePlanRevisionId);
+      if (hasUncertainWaitingStep(store, task, steps) && !steps.some(step => step.status === "running") && !hasIndependentReadWork(steps)) {
+        store.updateTask({ ...task, status: "waiting_for_input", updatedAt: now,
+          waitReason: { kind: "operator", summary: "Independent read-only work is settled. Review uncertain local effects before retrying or starting further mutations.", requestedAt: now } });
+        store.appendEvent(this.#event(task, "task-state-changed", now, { data: { from: "running", to: "waiting_for_input", reasonCode: "uncertain-side-effects" } }));
+        return;
+      }
       if (steps.length === 0 || steps.some((step) => !isTerminalTaskStepStatus(step.status))) return;
       const requirements = taskRequestCompletion(store, task);
       const status: Task["status"] = steps.every((step) => step.status === "completed") && requirements.researchComplete && !requirements.fileOutputPending ? "completed" : "partial";
@@ -2358,7 +2371,7 @@ function deadlineExceededSettlement(
       "execution-limit-exceeded",
       `Attempt exceeded its ${reasonCode}.`,
       false,
-      false
+      settlement.outcome === "failed" && settlement.failure.uncertainSideEffects
     ),
     ...(diagnosticResults === undefined ? {} : { diagnosticResults }),
     ...(settlement.usage === undefined ? {} : { usage: settlement.usage }),
@@ -2369,7 +2382,8 @@ function deadlineExceededSettlement(
 }
 
 function mayPublishDiagnosticResults(failureRecord: TaskFailure): boolean {
-  if (failureRecord.uncertainSideEffects) return false;
+  // Executors sanitize and qualify diagnostic content. Effects govern replay,
+  // not whether an explicitly unaccepted result can be retained.
   return failureRecord.class !== "approval-required" &&
     failureRecord.class !== "approval-request-missing";
 }
@@ -2805,4 +2819,30 @@ export function executorFailureDiagnostic(error: unknown, attemptId: string): st
   const reference = createHash("sha256").update(attemptId).digest("hex").slice(0, 12);
   return `Executor failed before returning a settlement. ${name}; reference ${reference}` +
     (locations.length ? `; at ${locations.join(", ")}` : "; no source location available");
+}
+
+/** Authority, not a model's idempotency label, establishes safe continuation. */
+function hasReadOnlyAuthority(step: TaskStep): boolean {
+  return !step.authorityPolicy.mayCreateChildTasks && TASK_TOOL_RISK_CLASSES.every(risk =>
+    risk === "read-only-local" || risk === "read-only-network" || step.authorityPolicy.riskClassPolicy[risk] === "forbid");
+}
+
+function hasUncertainWaitingStep(store: TaskStore, task: Task, steps: readonly TaskStep[]): boolean {
+  return steps.some(step => step.status === "waiting_for_input" && store.listAttempts(task.id, step.id)
+    .some(attempt => attempt.failure?.uncertainSideEffects === true));
+}
+
+function canDispatchAfterUncertainty(store: TaskStore, task: Task, step: TaskStep): boolean {
+  return !task.activePlanRevisionId || !hasUncertainWaitingStep(store, task, store.listSteps(task.id, task.activePlanRevisionId)) || hasReadOnlyAuthority(step);
+}
+
+function hasIndependentReadWork(steps: readonly TaskStep[]): boolean {
+  const byId = new Map(steps.map(step => [step.id, step]));
+  const available = (step: TaskStep, visiting = new Set<string>()): boolean => {
+    if (step.status === "completed") return true;
+    if (!["pending", "ready", "running"].includes(step.status) || !hasReadOnlyAuthority(step) || visiting.has(step.id)) return false;
+    const seen = new Set(visiting).add(step.id);
+    return step.dependsOn.every(id => { const dependency = byId.get(id); return dependency !== undefined && available(dependency, seen); });
+  };
+  return steps.some(step => step.status !== "completed" && available(step));
 }

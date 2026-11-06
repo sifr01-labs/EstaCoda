@@ -1,0 +1,301 @@
+[
+  {
+    "arm": "after",
+    "test": "comparison",
+    "foregroundOutcome": "partially_completed",
+    "elapsedMs": 659147,
+    "providerCalls": 100,
+    "inputTokens": 1996408,
+    "outputTokens": 22353,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "tasks": [
+      {
+        "status": "completed",
+        "settlementDurationMs": 575064,
+        "steps": [
+          {
+            "id": "step_2a9a62ab-3a04-497e-83bc-119c9435081b",
+            "title": "Delegated work 1",
+            "role": "worker",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 29,
+                "totalTokens": 564801
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 9952,
+                "sha256": "sha256:23372b3499a41a403d766454e6297d07cc3680570ff6255e92c34daddebec10f"
+              }
+            ]
+          },
+          {
+            "id": "step_3d0e5d26-9745-44a3-973f-d1b0ca4886be",
+            "title": "Delegated work 2",
+            "role": "worker",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 24,
+                "totalTokens": 577367
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 12869,
+                "sha256": "sha256:48aa539de2159583d4f342d39576978af43e88a6ebd8d440c7553e4301197151"
+              }
+            ]
+          },
+          {
+            "id": "step_ac7dae6f-2949-406e-8a18-d8faf4c1c113",
+            "title": "Delegated work 3",
+            "role": "worker",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 29,
+                "totalTokens": 632071
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 14596,
+                "sha256": "sha256:1cca89457a54a9c0e9cd90f9d71c026200ba0cff23b23f7c7f5933c702c826b0"
+              }
+            ]
+          },
+          {
+            "id": "step_ea21f637-df5a-4ac9-8e9e-ae6c3dee9288",
+            "title": "Synthesize delegated results",
+            "role": "synthesis",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 4,
+                "totalTokens": 55596
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 37415,
+                "sha256": "sha256:e4accb084da63301c0fbfc221dd086dfe0b79df9ad2b40a0e3e5cc7a0bc43bb4"
+              }
+            ]
+          },
+          {
+            "id": "step_fa5bbc85-f433-450e-b679-7bb08624f072",
+            "title": "Save and verify research report",
+            "role": "report-delivery",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 0,
+                "totalTokens": 0
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 74,
+                "sha256": "sha256:66d7b6de1467f2571902793df290f9b757dbc5aa68333e5b33a8654db420176c"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "reports": [
+      {
+        "path": "reports/superagent-vs-estacoda.md",
+        "bytes": 37415,
+        "sha256": "e4accb084da63301c0fbfc221dd086dfe0b79df9ad2b40a0e3e5cc7a0bc43bb4",
+        "matchesAcceptedResult": true
+      }
+    ],
+    "changedOriginalFixtureFiles": [],
+    "learning": {
+      "pendingHandoffs": 0,
+      "pendingReviews": 0,
+      "drafts": [
+        {
+          "status": "proposed",
+          "attempts": 1,
+          "proposalCreated": true
+        }
+      ],
+      "observations": [
+        {
+          "sessionId": "child_aaa2b2af-eba0-4883-9548-b38d33e8dd1e",
+          "outcome": "succeeded",
+          "timestamp": "2026-11-06T10:26:06.310Z"
+        },
+        {
+          "sessionId": "child_85a3398f-8142-4991-abfb-ae552470342e",
+          "outcome": "partial",
+          "timestamp": "2026-11-06T10:26:15.226Z"
+        },
+        {
+          "sessionId": "child_641e292e-3da8-4e1e-9011-b63970a97eea",
+          "outcome": "partial",
+          "timestamp": "2026-11-06T10:29:32.131Z"
+        },
+        {
+          "sessionId": "eea30faf-9e82-48f6-be8e-34c13deacfee",
+          "outcome": "succeeded",
+          "settledTasks": {
+            "id": "75a54b3a5c8f8efd63c35e10b452bbfa873837f658a715c23e3a4b28a5ddf228",
+            "taskIds": [
+              "task_38096e8a-a64d-4401-9654-0e7d433f6971"
+            ],
+            "failures": [],
+            "acceptedResults": 5,
+            "diagnosticResults": 0,
+            "results": [
+              {
+                "taskId": "task_38096e8a-a64d-4401-9654-0e7d433f6971",
+                "resultId": "563c758a-2597-42b3-8557-6561a1714d31",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_38096e8a-a64d-4401-9654-0e7d433f6971",
+                "resultId": "26d568ff-0480-4af0-868a-c330831f9488",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_38096e8a-a64d-4401-9654-0e7d433f6971",
+                "resultId": "b53ca735-108d-4461-b2a2-6b27e9cd42a4",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_38096e8a-a64d-4401-9654-0e7d433f6971",
+                "resultId": "df1e3616-ea2d-409e-a1ab-8f355fe34f24",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_38096e8a-a64d-4401-9654-0e7d433f6971",
+                "resultId": "502a4739-fb75-4c48-bffb-e89aab7cebfe",
+                "disposition": "accepted"
+              }
+            ]
+          },
+          "findings": [],
+          "timestamp": "2026-11-06T10:33:08.541Z"
+        }
+      ]
+    }
+  },
+  {
+    "arm": "after",
+    "test": "continuation",
+    "foregroundOutcome": "completed",
+    "elapsedMs": 251514,
+    "providerCalls": 17,
+    "inputTokens": 183783,
+    "outputTokens": 8159,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "tasks": [
+      {
+        "status": "completed",
+        "settlementDurationMs": 212984,
+        "steps": [
+          {
+            "id": "step_9cfbd741-dd57-49b1-9369-912fb6e34a8f",
+            "title": "Delegated work",
+            "role": "worker",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 11,
+                "totalTokens": 148231
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 13424,
+                "sha256": "sha256:ef982820ba54ca1f4bcc17c89b68afdc21c9aad7d864d734500fec8884e2f022"
+              }
+            ]
+          },
+          {
+            "id": "step_6c5aabcd-cd90-4c0c-a6d1-efd71a939ea4",
+            "title": "Synthesize delegated results",
+            "role": "synthesis",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 2,
+                "totalTokens": 14222
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 15053,
+                "sha256": "sha256:ae36e8f808ec6a0e30bbb2c85b8dd7970a892afbe69cd20f4244f27fd3aae274"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "reports": [],
+    "changedOriginalFixtureFiles": [],
+    "learning": {
+      "pendingHandoffs": 0,
+      "pendingReviews": 0,
+      "drafts": [],
+      "observations": [
+        {
+          "sessionId": "4d4eb760-68e5-422e-89f8-5e68a05cd216",
+          "outcome": "succeeded",
+          "settledTasks": {
+            "id": "09753fee83398bfd141ad3c45bc11fdc42147f2940d79081a0c2b5b65a1f8b66",
+            "taskIds": [
+              "task_b0e66160-6855-455d-94f7-c2175a399114"
+            ],
+            "failures": [],
+            "acceptedResults": 2,
+            "diagnosticResults": 0,
+            "results": [
+              {
+                "taskId": "task_b0e66160-6855-455d-94f7-c2175a399114",
+                "resultId": "dea33a73-8c01-4743-91f3-fc064b79c876",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_b0e66160-6855-455d-94f7-c2175a399114",
+                "resultId": "2331a49c-40a0-4d50-9101-ea6e65b6de2e",
+                "disposition": "accepted"
+              }
+            ]
+          },
+          "timestamp": "2026-11-06T10:22:26.489Z"
+        }
+      ]
+    }
+  }
+]

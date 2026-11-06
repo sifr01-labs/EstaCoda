@@ -407,7 +407,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
         return {
           outcome: "failed",
           failure: providerFailure,
-          ...safeDiagnosticOutput(response.text, response.toolExecutions),
+          ...safeDiagnosticOutput(response.completionCandidate ?? response.text, response.toolExecutions),
           ...metering,
           ...common
         };
@@ -416,7 +416,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
         return {
           outcome: "failed",
           failure: { ...taskFailure("tool-error", false), uncertainSideEffects: response.toolExecutions.some(execution => execution.settlement?.sideEffectState === "possible") },
-          ...safeDiagnosticOutput(response.text, response.toolExecutions),
+          ...safeDiagnosticOutput(response.completionCandidate ?? response.text, response.toolExecutions),
           ...metering,
           ...common
         };
@@ -433,7 +433,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
       if (evidenceFailure !== undefined) return {
         outcome: "failed",
         failure: { ...taskFailure("evidence-contract-unsatisfied", false), message: (typeof evidenceFailure === "string" ? evidenceFailure : evidenceFailure.message).split(". ")[0] + ". Inspect the preserved draft and validation feedback." },
-        ...safeDiagnosticOutput(response.text, response.toolExecutions), ...metering, ...common
+        ...safeDiagnosticOutput(response.completionCandidate ?? response.text, response.toolExecutions), ...metering, ...common
       };
       const grounded = groundResearchResult({ task: input.task, step: input.step, store: this.#taskStore,
         text: response.text, executions: response.toolExecutions, now: this.#now() });
@@ -446,7 +446,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
         return {
           outcome: "failed",
           failure: captured.failure,
-          ...safeDiagnosticOutput(response.text, response.toolExecutions),
+          ...safeDiagnosticOutput(response.completionCandidate ?? response.text, response.toolExecutions),
           ...metering,
           ...common
         };
@@ -771,6 +771,7 @@ function researchCompletionFailure(
     repairable: unresolved.every(execution => ["read-only-local", "read-only-network"].includes(execution.riskClass) && execution.decision === "allow")
   };
   const missing = researchEvidenceFailure(input.step, text, [...executions]);
+  if (missing === "repository-evidence") return "Research evidence needs correction: repository-evidence. Read the relevant source with file.read and cite an observed workspace-relative path. Search/discovery is optional when the path is already known.";
   return missing === undefined ? undefined : `Research evidence needs correction: ${missing}. Cite evidence observed with the assigned tools; obtain missing evidence or explicitly report the unresolved gap.`;
 }
 
@@ -799,16 +800,11 @@ function researchEvidenceFailure(
 
   if (research.requireRepositoryEvidence) {
     const repositoryReads = successful.filter((execution) => execution.tool.name === "file.read");
-    const usedDiscovery = successful.some((execution) =>
-      execution.tool.name === "file.search" ||
-      execution.tool.name === "file.grep" ||
-      execution.tool.name === "file.glob"
-    );
     const observedPaths = new Set(repositoryReads.flatMap((execution) => [
       workspaceRelativeReference(execution.result?.metadata?.path),
       workspaceRelativeReference(execution.input?.path)
     ].filter((path): path is string => path !== undefined)));
-    if (!usedDiscovery || observedPaths.size === 0 || ![...observedPaths].some((path) => hasWorkspaceReference(text, path))) {
+    if (observedPaths.size === 0 || ![...observedPaths].some((path) => hasWorkspaceReference(text, path))) {
       return "repository-evidence";
     }
   }
