@@ -1,0 +1,78 @@
+[
+  {
+    "sessionId": "child_ac61837b-53b1-4868-ac21-20a880310e17",
+    "input": {
+      "task_id": "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30",
+      "result_id": "0f6b815e-5ba9-467c-8c1e-b4da64a69574",
+      "offset": 0,
+      "max_chars": 20000
+    },
+    "ok": true,
+    "metadata": {
+      "primary": false,
+      "taskId": "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30",
+      "resultId": "0f6b815e-5ba9-467c-8c1e-b4da64a69574",
+      "resultHandle": "task-result:b303e9b9-2665-492e-afd4-398c61fe0ee9",
+      "kind": "text",
+      "disposition": "accepted",
+      "mimeType": "text/plain; charset=utf-8",
+      "contentHash": "sha256:bc7865d75d9762eb4c76b6f10f2c105beb0741faadf4581cf602f2fe92bf9df2",
+      "byteLength": 11694,
+      "offset": 0,
+      "totalChars": 11640,
+      "hasMore": false
+    }
+  },
+  {
+    "sessionId": "child_ac61837b-53b1-4868-ac21-20a880310e17",
+    "input": {
+      "task_id": "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30",
+      "result_id": "cfa89dc4-ffb2-4f68-a3f8-120893fc7b9e",
+      "offset": 0,
+      "max_chars": 20000
+    },
+    "ok": true,
+    "metadata": {
+      "primary": false,
+      "taskId": "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30",
+      "resultId": "cfa89dc4-ffb2-4f68-a3f8-120893fc7b9e",
+      "resultHandle": "task-result:63f1dd58-fe70-4377-bf19-9b33dbfc481d",
+      "kind": "text",
+      "disposition": "accepted",
+      "mimeType": "text/plain; charset=utf-8",
+      "contentHash": "sha256:b28458e2e6f5c9d6b6bbecd226a3f9324289eab0958c9f20c230fffdb9979d2e",
+      "byteLength": 11884,
+      "offset": 0,
+      "totalChars": 11798,
+      "hasMore": false
+    }
+  },
+  {
+    "sessionId": "child_ac61837b-53b1-4868-ac21-20a880310e17",
+    "input": {
+      "task_id": "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30",
+      "result_id": "ebdeae7b-7859-4777-ae1c-f0034a74cb60",
+      "offset": 0,
+      "max_chars": 20000
+    },
+    "ok": true,
+    "metadata": {
+      "primary": false,
+      "taskId": "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30",
+      "resultId": "ebdeae7b-7859-4777-ae1c-f0034a74cb60",
+      "resultHandle": "task-result:a3912deb-6e0a-4d6c-9e34-da045d94ea48",
+      "kind": "text",
+      "disposition": "accepted",
+      "mimeType": "text/plain; charset=utf-8",
+      "contentHash": "sha256:3f3385e315f4ff7a3db7ff25de2364ce6e0bdb6abbf711b74b5a8759747e252f",
+      "byteLength": 19617,
+      "offset": 0,
+      "totalChars": 19559,
+      "hasMore": false,
+      "retainedOutput": true,
+      "retentionLimited": false,
+      "observationMessageId": "189a2e8d-2dbe-433b-ae41-f7dd0514034f",
+      "observationSessionId": "child_ac61837b-53b1-4868-ac21-20a880310e17"
+    }
+  }
+]

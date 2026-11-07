@@ -1,3 +1,4 @@
+import { RESEARCH_OBSERVATIONS_MIME } from "./research-observations.js";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Task, TaskStep, TaskResult } from "../contracts/task.js";
@@ -25,6 +26,27 @@ function ground(text = claim, executions = [execution("web.search", { results: [
 }
 
 describe("research result evidence", () => {
+  it.each(["valid", "unread", "tampered", "model-artifact", "wrong-plan", "invented-url"])("uses host source observations with integrity and scope checks: %s", mode => {
+    const packet = JSON.stringify({ version: 1, notice: "incomplete", omittedObservations: 0, unresolvedChecks: ["policy-tests"], observations: [
+      { tool: "web.extract", reference: url, excerpt: "Observed implementation", contentHash: "sha256:original", truncated: true }
+    ] });
+    const receipt = page(packet, { disposition: "diagnostic" });
+    const result = { id: "result", stepId: "worker", kind: mode === "model-artifact" ? "artifact" : "json", disposition: "diagnostic", status: "available",
+      mimeType: RESEARCH_OBSERVATIONS_MIME, contentHash: receipt.result!.metadata!.contentHash } as TaskResult;
+    const steps = { ...worker, status: "failed", planRevisionId: mode === "wrong-plan" ? "other" : "plan" } as TaskStep;
+    const fakeStore = { getStep: () => steps, listResults: () => [result] } as unknown as TaskStore;
+    const synth = { ...worker, id: "synthesis", planRevisionId: "plan", dependsOn: ["worker"], executor: { kind: "agent", role: "synthesis", requestContract: contract } } as TaskStep;
+    if (mode === "tampered") receipt.result!.content += " ";
+    const grounded = groundResearchResult({ task, step: synth, store: fakeStore, text: mode === "invented-url" ? "https://invented.example/" : claim,
+      executions: mode === "unread" ? [] : [receipt], now });
+    if (mode === "valid") {
+      expect(grounded.failure).toBeUndefined();
+      expect(grounded.text).toContain("policy-tests");
+      expect(grounded.text).toContain("Incomplete worker");
+      expect(grounded.text).toContain("captured extract");
+      expect(readTaskResultEvidence([receipt], "task")).toEqual([]);
+    } else expect(grounded.failure).toBeDefined();
+  });
   it("keeps source records in one appendix after the report without growing on revalidation", () => {
     const report = `## Findings\n\nA finding from [the study](${url}).\n\n${claim}\n\n## Limitations\n\nSmall synthetic sample.`;
     const first = ground(report).text!;

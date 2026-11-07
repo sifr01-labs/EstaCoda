@@ -415,6 +415,13 @@ describe("AgentStepExecutor", () => {
         diagnostic: true
       },
       {
+        name: "abbreviated-url",
+        research: { scope: "live", requireLiveSources: true, requireRepositoryEvidence: false },
+        text: "Observed https://observed.example/report and https://github.com/deepseek-ai/...git",
+        executions: [successfulEvidenceExecution("web.search", "read-only-network", ["web", "research"], { query: "report" }, "Source", { results: [{ url: "https://observed.example/report" }] })],
+        outcome: "failed", diagnostic: true
+      },
+      {
         name: "mixed-observed-and-fabricated-live-urls",
         research: { scope: "live", requireLiveSources: true, requireRepositoryEvidence: false },
         text: "Observed https://observed.example/report but also https://fabricated.example/report",
@@ -518,6 +525,9 @@ describe("AgentStepExecutor", () => {
       });
 
       expect(settlement.outcome).toBe(candidate.outcome);
+      if (candidate.name === "abbreviated-url" && settlement.outcome === "failed") {
+        expect(settlement.failure.message).toContain("live-sources");
+      }
       if (candidate.outcome === "failed") {
         expect(settlement).toMatchObject({
           failure: { class: "evidence-contract-unsatisfied", retryable: false }
@@ -892,8 +902,8 @@ describe("AgentStepExecutor", () => {
     const settled = await executor.execute({ task: graph.task, step, attempt: attempt(graph), signal: new AbortController().signal, heartbeat: vi.fn(), checkpoint: vi.fn() });
     expect(settled.outcome).toBe(["recovered", "settled"].includes(mode) ? "succeeded" : "failed");
     if (mode === "uncertain") expect(settled).toMatchObject({ failure: { uncertainSideEffects: true } });
-    if (mode === "denied") expect(settled).toMatchObject({ failure: { class: "security-deny" }, diagnosticResults: [{ content: text }] });
-    if (mode === "uncertain") expect(settled).toMatchObject({ diagnosticResults: [{ content: expect.stringContaining("local execution effects remain uncertain") }] });
+    if (mode === "denied") expect(settled).toMatchObject({ failure: { class: "security-deny" }, diagnosticResults: expect.arrayContaining([{ kind: "text", content: text, mimeType: "text/plain; charset=utf-8", summary: "Recovered output from a failed Attempt; incomplete and not accepted as the Step result." }]) });
+    if (mode === "uncertain") expect(settled).toMatchObject({ diagnosticResults: expect.arrayContaining([expect.objectContaining({ kind: "text", content: expect.stringContaining("local execution effects remain uncertain") })]) });
     if (["unknown", "privileged"].includes(mode)) expect(settled).not.toHaveProperty("diagnosticResults");
   });
 

@@ -117,7 +117,7 @@ const PROTECTED_OTP_CONTINUATION_PROMPT = [
 ].join(" ");
 
 /** Host-owned completion feedback. A terminal blocker must not invite prose retries. */
-export type CompletionFeedback = string | { message: string; repairable: boolean };
+export type CompletionFeedback = string | { message: string; repairable: boolean; mode?: "text-only" };
 function completionFeedbackText(feedback: CompletionFeedback | undefined): string | undefined {
   return typeof feedback === "string" ? feedback : feedback?.message;
 }
@@ -392,6 +392,7 @@ export class ProviderTurnLoop {
     let completionCandidate: string | undefined;
     let completionRepairs = 0;
     let completionReadbackPaths: readonly string[] | undefined;
+    let completionTextOnly = false;
     const completionDeniedTools = new Set<string>();
     let pendingEmptyResponseNudge = false;
     let postToolEmptyRetried = false;
@@ -510,7 +511,7 @@ export class ProviderTurnLoop {
       retryEmptyInitialResponse = false;
       retryReasoningOnlyInitialResponse = false;
       const providerToolsForIteration = filterSuppressedBrowserProviderTools(
-        completionReadbackPaths === undefined ? activeProviderTools : activeProviderTools.filter(tool =>
+        completionTextOnly ? [] : completionReadbackPaths === undefined ? activeProviderTools : activeProviderTools.filter(tool =>
           (input.providerToolSchemaCatalog?.aliases.get(tool.function.name) ?? tool.function.name) === "file.read"),
         supervisionPrompt.suppressedBrowserTools
       );
@@ -775,6 +776,7 @@ export class ProviderTurnLoop {
       const beforeExecutions = providerToolExecutions.length;
       const beforePlans = input.toolPlans.length;
       const runtimeAdmissionGuard: RuntimeToolAdmissionGuard = admission => {
+        if (completionTextOnly) return { code: "completion-text-only", reason: "Correct only the report text using existing observations. No tool execution is authorized in this repair." };
         const blocker = executionSupervision.runtimeAdmissionGuard()(admission);
         if (blocker) return blocker;
         if (completionDeniedTools.has(admission.tool.name)) return {
@@ -1191,15 +1193,25 @@ export class ProviderTurnLoop {
           ["terminal.run", "terminal.inspect", "execute_code"].includes(call.tool.name) &&
           call.riskClass !== "external-side-effect" && call.executionEffect?.connector === undefined);
         const readbackPaths = hasBoundary ? input.completionReadbackPaths?.([...input.toolExecutions, ...providerToolExecutions]) : undefined;
-        const repair = !this.#taskBudgetFinalizing && completionValidationFailure !== undefined && (typeof validationFailure === "string" || validationFailure?.repairable !== false) && completionRepairs < 2 &&
-          iteration + consumedProviderIterations < this.#budgets.maxProviderIterations && !input.signal?.aborted &&
-          (!hasBoundary || (readbackPaths !== undefined && readbackPaths.length > 0) ||
-            (canUseAlternative && activeProviderTools.some(tool => !boundaries.some(call =>
-              !canReassessHardlineCommand(call) && call.tool.name === (input.providerToolSchemaCatalog?.aliases.get(tool.function.name) ?? tool.function.name)))));
+        const textOnly = typeof validationFailure === "object" && validationFailure.mode === "text-only";
+        const boundaryRepair = !hasBoundary || (readbackPaths !== undefined && readbackPaths.length > 0) ||
+          (canUseAlternative && activeProviderTools.some(tool => !boundaries.some(call =>
+            !canReassessHardlineCommand(call) && call.tool.name === (input.providerToolSchemaCatalog?.aliases.get(tool.function.name) ?? tool.function.name))));
+        const repairBlockedReason = completionValidationFailure === undefined ? undefined
+          : input.signal?.aborted ? "cancelled"
+          : typeof validationFailure === "object" && !validationFailure.repairable ? "not-repairable"
+          : completionRepairs >= 2 ? "repair-limit"
+          : iteration + consumedProviderIterations >= this.#budgets.maxProviderIterations ? "iteration-limit"
+          : this.#taskBudgetFinalizing && !textOnly ? "task-finalizing"
+          : !boundaryRepair ? "authorization-boundary" : undefined;
+        // A textual correction may use remaining finalization allowance. The
+        // provider budget reservation still enforces tokens, calls and time.
+        const repair = completionValidationFailure !== undefined && repairBlockedReason === undefined;
         await this.#sessionDb.appendEvent(this.#currentSessionId(), {
           kind: "step-completion-validation", accepted: completionValidationFailure === undefined,
           ...(completionValidationFailure === undefined ? {} : { feedback: completionValidationFailure }),
-          repair, repairAttempt: completionRepairs
+          repair, repairAttempt: completionRepairs,
+          ...(repairBlockedReason === undefined ? {} : { repairBlockedReason })
         });
         pendingCompletionFeedback = completionValidationFailure;
         completionCandidate = completionValidationFailure === undefined ? undefined : redactSensitiveText(execution.response.content);
@@ -1209,6 +1221,8 @@ export class ProviderTurnLoop {
             content: completionCandidate, metadata: { completionCandidate: true, accepted: false } });
         }
         if (repair) {
+          completionTextOnly = textOnly;
+          if (textOnly) pendingCompletionFeedback += " This is a text-only correction: use existing observations, do not call tools or claim new verification.";
           if (hasBoundary) {
             for (const call of [...input.toolExecutions, ...providerToolExecutions]) {
               if (call.decision !== "allow" && !canReassessHardlineCommand(call)) completionDeniedTools.add(call.tool.name);

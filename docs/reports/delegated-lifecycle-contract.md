@@ -2,7 +2,7 @@
 
 A stopped execution is not a successful task, and a retained draft is not accepted evidence. These are separate decisions.
 
-The scheduler preserves validated output as diagnostic results when final execution-limit accounting rejects it, including time, call, token and ancestor limits. Diagnostic publication retains the existing attempt fence, profile and result access checks. Cancellation and lost ownership do not authorize late publication. Diagnostics do not satisfy successful dependencies or research coverage. Invalid result contracts remain rejected.
+The scheduler preserves validated output as diagnostic results when final execution-limit accounting rejects it, including time, call, token and ancestor limits. Diagnostic publication retains the existing attempt fence, profile and result access checks. Cancellation and lost ownership do not authorize late publication. Diagnostics do not satisfy successful dependencies or establish complete research coverage. Runtime source-observation packets are separately identified from model drafts as described below. Invalid result contracts remain rejected.
 
 The existing authorized parent/recovery path can inspect diagnostic references and verify sources before producing a new accepted result. A synthesis worker restricted to task-result reads cannot independently verify those sources. Preserving a draft therefore does not establish complete coverage or authorize more work; recovery needs appropriate existing authority and remaining budget.
 
@@ -13,7 +13,7 @@ Before each Task provider dispatch, the existing SQLite spend transaction also c
 
 Workers see the remaining shared allowance. Near exhaustion, the provider loop requests a qualified final answer without tools inside the existing allowance. This does not grant extra calls or accept unsupported coverage. Independent reads should be batched and test prerequisites checked early. Identical original/routed user messages are no longer duplicated; full research history is not silently discarded to save tokens.
 
-Finalization and dispatch use the same conservative input estimate. The output allowance is bounded by the remaining tokens, with space for reasoning and the budget notice. A finalization request does not trigger additional completion-repair rounds. Fallbacks and text continuations still pass through admission; continuation merging retains the specific budget-denial reason. Actual usage can differ from estimates, so settlement remains authoritative.
+Finalization and dispatch use the same conservative input estimate. The output allowance is bounded by the remaining tokens, with space for reasoning and the budget notice. A finalization request does not trigger ordinary tool-using completion repair. A host-identified textual citation correction may use the remaining allowance with tools disabled; it does not expand the budget. Fallbacks and text continuations still pass through admission; continuation merging retains the specific budget-denial reason. Actual usage can differ from estimates, so settlement remains authoritative.
 
 ## Learning after settlement
 
@@ -57,4 +57,16 @@ An uncertain step remains waiting for operator review, without automatic replay.
 
 Repository research acceptance requires a successful source read and a matching observed workspace-relative citation. Discovery/search is optional when the path is known. Missing or uncited reads still fail acceptance with actionable feedback. This verifies source provenance, not the semantic truth of every claim.
 
-Risk note: this change broadens disclosure of sanitized local diagnostics, not execution authority or automatic retries. Synthesis still cannot treat diagnostics as accepted coverage. Real command termination and cancellation tests complement scheduler tests for retained failure status, blocked writes, and independent read continuation.
+Risk note: this change broadens disclosure of sanitized local diagnostics, not execution authority or automatic retries. Synthesis still cannot treat model diagnostic drafts as accepted coverage. Real command termination and cancellation tests complement scheduler tests for retained failure status, blocked writes, and independent read continuation.
+
+## Partial source observations and citation correction
+
+An incomplete research worker may publish two distinct diagnostic results through the existing fenced result service: its sanitized unaccepted draft, and a runtime-generated JSON packet of authorized source observations. The latter uses the reserved `application/vnd.estacoda.research-observations+json` MIME type and `json` kind; model-authored JSON and artifacts cannot acquire that identity through result capture.
+
+Packets contain at most 32 sanitized excerpts (2,400 characters each), source paths or observed URLs, tool-call identifiers, original output hashes, explicit truncation/omission information, settled check exits when available, and unresolved verification labels. They contain no inferred worker conclusions. Denied reads, failed retrievals, uncertain observations, privileged disclosure and private absolute file paths are excluded. Source content remains untrusted data, including any embedded instructions.
+
+When all dependencies have settled, an eligible packet can enable partial synthesis even if no worker completed successfully; ordinary diagnostic prose cannot. Synthesis receives explicit packet references and must read their complete hash-matching content through the ordinary authorized result reader. Only packets from assigned dependencies in the active plan qualify. Synthesis may derive narrowly cited findings from the captured excerpts while retaining their limits. Draft claims, complete task coverage and failed tests are not promoted. Existing failed step status and partial task settlement remain unchanged. This reuses captured observations; it does not grant the synthesizer new source-access or execution permissions.
+
+Live-source feedback lists exact unmatched URLs. When existing observations suffice for a textual correction, the same bounded repair loop removes tool exposure and refuses tool execution. A correction may use remaining finalization allowance but never bypasses token/call/time reservations, cancellation or authorization boundaries. Validation events record why repair was skipped (budget finalization, iteration/repair limits, nonrepairable feedback, cancellation or authorization). Abbreviated URLs are not silently exempted from citation validation.
+
+Security review focus: source excerpts cross from incomplete workers to synthesis, so test source provenance, complete-page/hash matching, dependency/plan identity, credential redaction, artifact impersonation, unresolved check retention and unchanged failure states. This contract verifies provenance and completion facts, not the truth of every model-authored claim.

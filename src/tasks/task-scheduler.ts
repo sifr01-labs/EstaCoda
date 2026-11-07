@@ -1,3 +1,4 @@
+import { isResearchObservationResult } from "./research-observations.js";
 import { taskRequestCompletion } from "./task-primary-result.js";
 import { createHash, randomUUID } from "node:crypto";
 import type {
@@ -958,7 +959,7 @@ export class TaskScheduler {
           const blocked = dependencies.some((dependency) => isTerminalTaskStepStatus(dependency.status) && dependency.status !== "completed");
           const allSettled = dependencies.every((dependency) => isTerminalTaskStepStatus(dependency.status));
           const partialSynthesisReady = !allCompleted && allSettled && isSynthesisStep(step) &&
-            hasAcceptedDependencyResult(store, task.id, dependencies);
+            hasSynthesisDependencyResult(store, task.id, dependencies);
           const status = allCompleted || partialSynthesisReady
             ? "ready"
             : blocked && (!isSynthesisStep(step) || allSettled)
@@ -2247,7 +2248,7 @@ function isSynthesisStep(step: TaskStep): boolean {
   return step.executor.kind === "agent" && step.executor.role === "synthesis";
 }
 
-function hasAcceptedDependencyResult(
+function hasSynthesisDependencyResult(
   store: TaskStore,
   taskId: string,
   dependencies: readonly TaskStep[]
@@ -2255,12 +2256,12 @@ function hasAcceptedDependencyResult(
   const completedDependencyIds = new Set(
     dependencies.filter((dependency) => dependency.status === "completed").map((dependency) => dependency.id)
   );
-  if (completedDependencyIds.size === 0) return false;
+  const failedDependencyIds = new Set(dependencies.filter(dependency => dependency.status === "failed").map(dependency => dependency.id));
   return store.listResults(taskId).some((result) =>
     result.status === "available" &&
-    result.disposition === "accepted" &&
     result.stepId !== undefined &&
-    completedDependencyIds.has(result.stepId)
+    ((result.disposition === "accepted" && completedDependencyIds.has(result.stepId)) ||
+      (isResearchObservationResult(result) && failedDependencyIds.has(result.stepId)))
   );
 }
 

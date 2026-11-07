@@ -1,0 +1,112 @@
+{
+  "arm": "after",
+  "test": "continuation",
+  "foregroundOutcome": "completed",
+  "elapsedMs": 227321,
+  "providerCalls": 29,
+  "inputTokens": 570834,
+  "outputTokens": 9024,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "partial",
+      "settlementDurationMs": 208940,
+      "steps": [
+        {
+          "id": "step_63761a66-cb48-47b1-9477-aa82f497f100",
+          "title": "Delegated work",
+          "role": "worker",
+          "status": "failed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "failed",
+              "failure": {
+                "class": "evidence-contract-unsatisfied",
+                "message": "Execution stopped (normal). Declared checks remain unresolved: [\"prototype-policy-tests\"]. Verify those requirements on the current result using an authorized command and reuse the exact verification label. A missing interpreter, crash, failed exit, or stale check is not a passing validation. Reading files or passing a differently named check does not settle these requirements. Do not retry denied actions, bypass permissions, or rerun uncertain side effects. If blocked, report what remains unver",
+                "retryable": false,
+                "uncertainSideEffects": false
+              },
+              "providerCalls": 26,
+              "totalTokens": 559208
+            }
+          ],
+          "results": [
+            {
+              "id": "83447d5b-9520-4b69-abed-4e2895af6b97",
+              "kind": "text",
+              "mimeType": "text/plain; charset=utf-8",
+              "disposition": "diagnostic",
+              "bytes": 14334,
+              "sha256": "sha256:15d2dc36e46b37231cfd0b5eb0a51a5d9387ae3e74d696b818c91e3212dc43ac"
+            },
+            {
+              "id": "d0cc5a0c-01bb-4965-b1b3-aeb62638954b",
+              "kind": "json",
+              "mimeType": "application/vnd.estacoda.research-observations+json",
+              "disposition": "diagnostic",
+              "bytes": 42922,
+              "sha256": "sha256:b6fe07b909476e4f56d1ba82def3a240dcd48dfdf7f9c31a12b9ec82379c77ce"
+            }
+          ]
+        },
+        {
+          "id": "step_280516c5-1d96-41c2-a281-f70ead48e046",
+          "title": "Synthesize delegated results",
+          "role": "synthesis",
+          "status": "skipped",
+          "tokenLimit": 1000000,
+          "attempts": [],
+          "results": []
+        },
+        {
+          "id": "step_7bc26785-956f-44b6-8583-7a61927034e5",
+          "title": "Save and verify research report",
+          "role": "report-delivery",
+          "status": "skipped",
+          "tokenLimit": 1000000,
+          "attempts": [],
+          "results": []
+        }
+      ]
+    }
+  ],
+  "reports": [],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "pendingReviews": 0,
+    "drafts": [],
+    "observations": [
+      {
+        "sessionId": "fb834304-c267-4cae-a7f8-17a0c9b46d29",
+        "outcome": "partial",
+        "settledTasks": {
+          "id": "53050d499ec44ae92a4a71a39cc9b720c23bb4e045c75264ddf014adeab4b62d",
+          "taskIds": [
+            "task_d283d2cd-55be-4470-ae27-df43239a25c4"
+          ],
+          "failures": [
+            "evidence-contract-unsatisfied"
+          ],
+          "acceptedResults": 0,
+          "diagnosticResults": 2,
+          "results": [
+            {
+              "taskId": "task_d283d2cd-55be-4470-ae27-df43239a25c4",
+              "resultId": "83447d5b-9520-4b69-abed-4e2895af6b97",
+              "disposition": "diagnostic"
+            },
+            {
+              "taskId": "task_d283d2cd-55be-4470-ae27-df43239a25c4",
+              "resultId": "d0cc5a0c-01bb-4965-b1b3-aeb62638954b",
+              "disposition": "diagnostic"
+            }
+          ]
+        },
+        "timestamp": "2026-11-07T00:17:38.224Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "deferredTurns": [
+    {
+      "id": "53050d499ec44ae92a4a71a39cc9b720c23bb4e045c75264ddf014adeab4b62d",
+      "profileId": "default",
+      "sessionId": "fb834304-c267-4cae-a7f8-17a0c9b46d29",
+      "taskIds": [
+        "task_d283d2cd-55be-4470-ae27-df43239a25c4"
+      ],
+      "promptSummary": "Investigate DeepSeek Superagent's authorization implementation in upstream/superagent/src/policy.ts and its policy test file. Delegate this source-and-test investigation to a worker, then synthesize its findings into reports/policy-assessment.md. This is a reproduction of an incomplete upstream test environment: do not install dependencies or modify source. Have the worker read the package manifest, policy implementation and tests, and run the policy test once using the workspace root node_modules/.bin/vitest with upstream/superagent as cwd, declared verification label prototype-policy-tests, and a short observation wait; collect the process exit. The missing upstream dependencies are intentional. Clearly report a loading failure as unexecuted behavior, never as a passing policy test. Preserve what the inspected implementation actually establishes, with source references. Produce a useful policy assessment even if the test cannot load; do not substitute a discussion only of EstaCoda",
+      "promptHash": "36bf2613cd0d8808"
+    }
+  ],
+  "pendingReviews": [
+    {
+      "id": "01d5761d-dbb5-4aa5-918f-fcc8a39ee9e9",
+      "profileId": "default",
+      "sessionId": "fb834304-c267-4cae-a7f8-17a0c9b46d29",
+      "workspaceIdentityHash": "3bb5f233c4035bd85f374f9fa49ba926ac9a1005129d63d3b3894bedf015894b"
+    }
+  ],
+  "records": []
+}

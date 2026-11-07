@@ -1,0 +1,421 @@
+[
+  {
+    "arm": "before",
+    "test": "continuation",
+    "foregroundOutcome": "completed",
+    "elapsedMs": 338083,
+    "providerCalls": 22,
+    "inputTokens": 404023,
+    "outputTokens": 15011,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "tasks": [
+      {
+        "status": "partial",
+        "settlementDurationMs": 319171,
+        "steps": [
+          {
+            "id": "step_078e2640-0b07-4de9-bda9-39b2e6d94bd3",
+            "title": "Delegated work",
+            "role": "worker",
+            "status": "failed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "failed",
+                "failure": {
+                  "class": "evidence-contract-unsatisfied",
+                  "message": "Execution stopped (normal). Declared checks remain unresolved: [\"prototype-policy-tests\"]. Verify those requirements on the current result using an authorized command and reuse the exact verification label. A missing interpreter, crash, failed exit, or stale check is not a passing validation. Reading files or passing a differently named check does not settle these requirements. Do not retry denied actions, bypass permissions, or rerun uncertain side effects. If blocked, report what remains unver",
+                  "retryable": false,
+                  "uncertainSideEffects": false
+                },
+                "providerCalls": 19,
+                "totalTokens": 398188
+              }
+            ],
+            "results": [
+              {
+                "id": "52c58ebb-00bf-4f4d-9a26-6c54d613c735",
+                "kind": "text",
+                "mimeType": "text/plain; charset=utf-8",
+                "disposition": "diagnostic",
+                "bytes": 18612,
+                "sha256": "sha256:3eda36ca5fbf64701101cab139fbe1dcdb18f35c2e84fba22200254dae108cec"
+              }
+            ]
+          },
+          {
+            "id": "step_c296972f-0d85-4172-adda-a0d27a59e930",
+            "title": "Synthesize delegated results",
+            "role": "synthesis",
+            "status": "skipped",
+            "tokenLimit": 1000000,
+            "attempts": [],
+            "results": []
+          },
+          {
+            "id": "step_0f9b79ad-99e8-4baf-b294-f1e3f74298cd",
+            "title": "Save and verify research report",
+            "role": "report-delivery",
+            "status": "skipped",
+            "tokenLimit": 1000000,
+            "attempts": [],
+            "results": []
+          }
+        ]
+      }
+    ],
+    "reports": [],
+    "changedOriginalFixtureFiles": [],
+    "learning": {
+      "pendingHandoffs": 0,
+      "pendingReviews": 0,
+      "drafts": [],
+      "observations": [
+        {
+          "sessionId": "4be425a7-c33c-4fdc-8a26-a777a6e35dac",
+          "outcome": "partial",
+          "settledTasks": {
+            "id": "3ba2c0fd3479ff0a51deba2aee6602dfad41dbfed32a2a81bbdf7689ca0e41e1",
+            "taskIds": [
+              "task_237ad79c-d597-4dc9-af3b-787902d5f02e"
+            ],
+            "failures": [
+              "evidence-contract-unsatisfied"
+            ],
+            "acceptedResults": 0,
+            "diagnosticResults": 1,
+            "results": [
+              {
+                "taskId": "task_237ad79c-d597-4dc9-af3b-787902d5f02e",
+                "resultId": "52c58ebb-00bf-4f4d-9a26-6c54d613c735",
+                "disposition": "diagnostic"
+              }
+            ]
+          },
+          "timestamp": "2026-11-07T00:10:55.880Z"
+        }
+      ]
+    }
+  },
+  {
+    "arm": "after",
+    "test": "comparison",
+    "foregroundOutcome": "partially_completed",
+    "elapsedMs": 505388,
+    "providerCalls": 96,
+    "inputTokens": 2081787,
+    "outputTokens": 22614,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "tasks": [
+      {
+        "status": "completed",
+        "settlementDurationMs": 449402,
+        "steps": [
+          {
+            "id": "step_981ef0a9-bd52-438c-84cc-87a3429c0421",
+            "title": "Delegated work 1",
+            "role": "worker",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 29,
+                "totalTokens": 652237
+              }
+            ],
+            "results": [
+              {
+                "id": "cfa89dc4-ffb2-4f68-a3f8-120893fc7b9e",
+                "kind": "text",
+                "mimeType": "text/plain; charset=utf-8",
+                "disposition": "accepted",
+                "bytes": 11884,
+                "sha256": "sha256:b28458e2e6f5c9d6b6bbecd226a3f9324289eab0958c9f20c230fffdb9979d2e"
+              }
+            ]
+          },
+          {
+            "id": "step_dbbe57e4-bc1e-440b-a1d9-399b8b44d5c8",
+            "title": "Delegated work 2",
+            "role": "worker",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 27,
+                "totalTokens": 633788
+              }
+            ],
+            "results": [
+              {
+                "id": "0f6b815e-5ba9-467c-8c1e-b4da64a69574",
+                "kind": "text",
+                "mimeType": "text/plain; charset=utf-8",
+                "disposition": "accepted",
+                "bytes": 11694,
+                "sha256": "sha256:bc7865d75d9762eb4c76b6f10f2c105beb0741faadf4581cf602f2fe92bf9df2"
+              }
+            ]
+          },
+          {
+            "id": "step_f4176790-e5f3-4ae8-8c0f-d05e5ac2272d",
+            "title": "Delegated work 3",
+            "role": "worker",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 24,
+                "totalTokens": 582401
+              }
+            ],
+            "results": [
+              {
+                "id": "ebdeae7b-7859-4777-ae1c-f0034a74cb60",
+                "kind": "text",
+                "mimeType": "text/plain; charset=utf-8",
+                "disposition": "accepted",
+                "bytes": 19617,
+                "sha256": "sha256:3f3385e315f4ff7a3db7ff25de2364ce6e0bdb6abbf711b74b5a8759747e252f"
+              }
+            ]
+          },
+          {
+            "id": "step_2f966116-7ef4-40bb-a8a5-4e5f3bf9153c",
+            "title": "Synthesize delegated results",
+            "role": "synthesis",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 4,
+                "totalTokens": 57402
+              }
+            ],
+            "results": [
+              {
+                "id": "45f26c8d-3afc-4fad-9274-fa552e33d061",
+                "kind": "text",
+                "mimeType": "text/plain; charset=utf-8",
+                "disposition": "accepted",
+                "bytes": 34797,
+                "sha256": "sha256:2f6b6a7318e4e4ad8fb2cab3df5b60d57e3943c7c124b96f67a4d237cce1d8ff"
+              }
+            ]
+          },
+          {
+            "id": "step_a91a94eb-07ac-4b9c-a380-fd309ef9dbeb",
+            "title": "Save and verify research report",
+            "role": "report-delivery",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 0,
+                "totalTokens": 0
+              }
+            ],
+            "results": [
+              {
+                "id": "2530d3cf-553a-4921-970d-519f50617cb1",
+                "kind": "text",
+                "mimeType": "text/plain; charset=utf-8",
+                "disposition": "accepted",
+                "bytes": 74,
+                "sha256": "sha256:66d7b6de1467f2571902793df290f9b757dbc5aa68333e5b33a8654db420176c"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "reports": [
+      {
+        "path": "reports/superagent-vs-estacoda.md",
+        "bytes": 34797,
+        "sha256": "2f6b6a7318e4e4ad8fb2cab3df5b60d57e3943c7c124b96f67a4d237cce1d8ff",
+        "matchesAcceptedResult": true
+      }
+    ],
+    "changedOriginalFixtureFiles": [],
+    "learning": {
+      "pendingHandoffs": 0,
+      "pendingReviews": 0,
+      "drafts": [
+        {
+          "status": "proposed",
+          "attempts": 1,
+          "proposalCreated": true
+        }
+      ],
+      "observations": [
+        {
+          "sessionId": "child_e4b67ab1-a2f2-46c0-9c87-b6e6e14e9958",
+          "outcome": "partial",
+          "timestamp": "2026-11-07T00:11:01.262Z"
+        },
+        {
+          "sessionId": "ff78e722-d239-434e-9a63-547b806e2840",
+          "outcome": "succeeded",
+          "settledTasks": {
+            "id": "2cb5b3e7eaf93c47269a1d9c87b49dae1d2014b73ab7bef6a78770494d133e2a",
+            "taskIds": [
+              "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30"
+            ],
+            "failures": [],
+            "acceptedResults": 5,
+            "diagnosticResults": 0,
+            "results": [
+              {
+                "taskId": "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30",
+                "resultId": "0f6b815e-5ba9-467c-8c1e-b4da64a69574",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30",
+                "resultId": "cfa89dc4-ffb2-4f68-a3f8-120893fc7b9e",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30",
+                "resultId": "ebdeae7b-7859-4777-ae1c-f0034a74cb60",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30",
+                "resultId": "45f26c8d-3afc-4fad-9274-fa552e33d061",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30",
+                "resultId": "2530d3cf-553a-4921-970d-519f50617cb1",
+                "disposition": "accepted"
+              }
+            ]
+          },
+          "findings": [],
+          "timestamp": "2026-11-07T00:13:37.433Z"
+        }
+      ]
+    }
+  },
+  {
+    "arm": "after",
+    "test": "continuation",
+    "foregroundOutcome": "completed",
+    "elapsedMs": 227321,
+    "providerCalls": 29,
+    "inputTokens": 570834,
+    "outputTokens": 9024,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "tasks": [
+      {
+        "status": "partial",
+        "settlementDurationMs": 208940,
+        "steps": [
+          {
+            "id": "step_63761a66-cb48-47b1-9477-aa82f497f100",
+            "title": "Delegated work",
+            "role": "worker",
+            "status": "failed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "failed",
+                "failure": {
+                  "class": "evidence-contract-unsatisfied",
+                  "message": "Execution stopped (normal). Declared checks remain unresolved: [\"prototype-policy-tests\"]. Verify those requirements on the current result using an authorized command and reuse the exact verification label. A missing interpreter, crash, failed exit, or stale check is not a passing validation. Reading files or passing a differently named check does not settle these requirements. Do not retry denied actions, bypass permissions, or rerun uncertain side effects. If blocked, report what remains unver",
+                  "retryable": false,
+                  "uncertainSideEffects": false
+                },
+                "providerCalls": 26,
+                "totalTokens": 559208
+              }
+            ],
+            "results": [
+              {
+                "id": "83447d5b-9520-4b69-abed-4e2895af6b97",
+                "kind": "text",
+                "mimeType": "text/plain; charset=utf-8",
+                "disposition": "diagnostic",
+                "bytes": 14334,
+                "sha256": "sha256:15d2dc36e46b37231cfd0b5eb0a51a5d9387ae3e74d696b818c91e3212dc43ac"
+              },
+              {
+                "id": "d0cc5a0c-01bb-4965-b1b3-aeb62638954b",
+                "kind": "json",
+                "mimeType": "application/vnd.estacoda.research-observations+json",
+                "disposition": "diagnostic",
+                "bytes": 42922,
+                "sha256": "sha256:b6fe07b909476e4f56d1ba82def3a240dcd48dfdf7f9c31a12b9ec82379c77ce"
+              }
+            ]
+          },
+          {
+            "id": "step_280516c5-1d96-41c2-a281-f70ead48e046",
+            "title": "Synthesize delegated results",
+            "role": "synthesis",
+            "status": "skipped",
+            "tokenLimit": 1000000,
+            "attempts": [],
+            "results": []
+          },
+          {
+            "id": "step_7bc26785-956f-44b6-8583-7a61927034e5",
+            "title": "Save and verify research report",
+            "role": "report-delivery",
+            "status": "skipped",
+            "tokenLimit": 1000000,
+            "attempts": [],
+            "results": []
+          }
+        ]
+      }
+    ],
+    "reports": [],
+    "changedOriginalFixtureFiles": [],
+    "learning": {
+      "pendingHandoffs": 0,
+      "pendingReviews": 0,
+      "drafts": [],
+      "observations": [
+        {
+          "sessionId": "fb834304-c267-4cae-a7f8-17a0c9b46d29",
+          "outcome": "partial",
+          "settledTasks": {
+            "id": "53050d499ec44ae92a4a71a39cc9b720c23bb4e045c75264ddf014adeab4b62d",
+            "taskIds": [
+              "task_d283d2cd-55be-4470-ae27-df43239a25c4"
+            ],
+            "failures": [
+              "evidence-contract-unsatisfied"
+            ],
+            "acceptedResults": 0,
+            "diagnosticResults": 2,
+            "results": [
+              {
+                "taskId": "task_d283d2cd-55be-4470-ae27-df43239a25c4",
+                "resultId": "83447d5b-9520-4b69-abed-4e2895af6b97",
+                "disposition": "diagnostic"
+              },
+              {
+                "taskId": "task_d283d2cd-55be-4470-ae27-df43239a25c4",
+                "resultId": "d0cc5a0c-01bb-4965-b1b3-aeb62638954b",
+                "disposition": "diagnostic"
+              }
+            ]
+          },
+          "timestamp": "2026-11-07T00:17:38.224Z"
+        }
+      ]
+    }
+  }
+]

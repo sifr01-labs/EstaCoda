@@ -367,7 +367,7 @@ export type TaskResult = {
   stepId?: TaskStepId;
   attemptId?: TaskAttemptId;
   kind: TaskResultKind;
-  /** Accepted Results may satisfy dependencies; diagnostic Results are inspection-only output from failed Attempts. */
+  /** Accepted Results may satisfy dependencies; diagnostic Results do not satisfy successful dependencies. Host-produced source observations may support qualified synthesis independently of unaccepted drafts. */
   disposition: TaskResultDisposition;
   status: TaskResultStatus;
   /** Opaque model- and UI-safe handle. Never an internal filesystem path. */

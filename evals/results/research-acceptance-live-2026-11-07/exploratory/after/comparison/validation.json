@@ -1,0 +1,30 @@
+[
+  {
+    "sessionId": "child_ac61837b-53b1-4868-ac21-20a880310e17",
+    "kind": "step-completion-validation",
+    "accepted": true,
+    "repair": false,
+    "repairAttempt": 0
+  },
+  {
+    "sessionId": "child_e4b67ab1-a2f2-46c0-9c87-b6e6e14e9958",
+    "kind": "step-completion-validation",
+    "accepted": true,
+    "repair": false,
+    "repairAttempt": 0
+  },
+  {
+    "sessionId": "child_d54f6eb8-06d4-4b9c-a186-e6f34440b215",
+    "kind": "step-completion-validation",
+    "accepted": true,
+    "repair": false,
+    "repairAttempt": 0
+  },
+  {
+    "sessionId": "child_f50e0e7f-6fa3-41e6-8bf5-472bd06ab4d8",
+    "kind": "step-completion-validation",
+    "accepted": true,
+    "repair": false,
+    "repairAttempt": 0
+  }
+]

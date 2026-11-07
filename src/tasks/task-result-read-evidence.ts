@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 
-/** Reassemble only successful, complete, integrity-matching accepted result pages. */
-export function readTaskResultEvidence(executions: readonly ToolExecutionRecord[], taskId: string) {
+/** Reassemble only successful, complete, integrity-matching result pages. Accepted-only by default; diagnostic callers must additionally verify the host-owned result type and dependency scope. */
+export function readTaskResultEvidence(executions: readonly ToolExecutionRecord[], taskId: string, disposition: "accepted" | "diagnostic" = "accepted") {
   const pages = new Map<string, { hash: string; total: number; primary: boolean; researchComplete?: boolean; parts: Map<number, string> }>();
   for (const execution of executions) {
     const m = execution.result?.metadata;
     if (execution.tool.name !== "task.result.read" || execution.decision !== "allow" || execution.result?.ok !== true ||
-      m?.taskId !== taskId || m.disposition !== "accepted" || typeof m.resultId !== "string" ||
+      m?.taskId !== taskId || m.disposition !== disposition || typeof m.resultId !== "string" ||
       typeof m.contentHash !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(m.contentHash) ||
       !Number.isSafeInteger(m.totalChars) || Number(m.totalChars) < 1 || Number(m.totalChars) > 256_000 ||
       !Number.isSafeInteger(m.offset) || Number(m.offset) < 0) continue;

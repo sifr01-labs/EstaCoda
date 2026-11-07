@@ -280,7 +280,7 @@ describe.sequential("research workflow acceptance harness", () => {
     expect(h.requests.some(request => request.messages.some(message => typeof message.content === "string" &&
       message.content.includes("https://unobserved.example/claim") && message.content.includes("Correct the existing draft")))).toBe(true);
     expect(h.searches).toEqual(["battery recycling"]);
-    const result = h.store.listResults(task.id).find(result => result.stepId === worker.id)!;
+    const result = h.store.listResults(task.id).find(result => result.stepId === worker.id && result.kind === "text")!;
     expect(result.disposition).toBe(exhausted ? "diagnostic" : "accepted");
     if (exhausted) {
       expect(attempt.failure?.message).toContain("unobserved-source");
@@ -306,6 +306,24 @@ describe.sequential("research workflow acceptance harness", () => {
     expect(await schedulerFor(h, task.id).scheduler.runOnce()).toMatchObject({ completed: 1, failed: 0 });
     expect(h.searches).toHaveLength(1);
     expect(h.extracts).toEqual([cited]);
+    scriptConsumed(h);
+  });
+
+  it("names and repairs an abbreviated URL without fetching the placeholder", async () => {
+    const h = await harness();
+    h.enqueue(nativeCall("delegate_task", { tasks: [{ task: "Research recycling.", allowedTools: ["web.search", "web.extract"],
+      research: { scope: "methods", requireLiveSources: true } }] }));
+    await h.turn("Use 1 worker to research current battery recycling.");
+    const task = h.store.listTasks()[0]!;
+    h.enqueue(nativeCall("web_search", { query: "battery recycling" }), answer(`${CLAIM_TABLE}\nFirst-party remotes: https://github.com/deepseek-ai/...git`), request => {
+      expect(JSON.stringify(request.messages)).toContain("https://github.com/deepseek-ai/...git");
+      expect(JSON.stringify(request.messages)).toContain("text-only correction");
+      expect(request.tools ?? []).toEqual([]);
+      return { content: CLAIM_TABLE };
+    });
+    expect(await schedulerFor(h, task.id).scheduler.runOnce()).toMatchObject({ completed: 1, failed: 0 });
+    expect(h.searches).toHaveLength(1);
+    expect(h.extracts).toEqual([]);
     scriptConsumed(h);
   });
 

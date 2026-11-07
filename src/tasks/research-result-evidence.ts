@@ -1,3 +1,4 @@
+import { isResearchObservationResult, parseResearchObservations } from "./research-observations.js";
 import type { Task, TaskStep } from "../contracts/task.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { TaskStore } from "./task-store.js";
@@ -17,8 +18,19 @@ export function requiresSourceTable(step: TaskStep, store: TaskStore): boolean {
 }
 
 /** No model statement is promoted into a retrieval/date/access receipt. */
-export function groundResearchResult(input: { task: Task; step: TaskStep; store: TaskStore; text: string; executions: readonly ToolExecutionRecord[]; now: Date }): { text?: string; failure?: string; feedback?: string } {
-  if (!requiresSourceTable(input.step, input.store)) return { text: input.text };
+export function groundResearchResult(input: { task: Task; step: TaskStep; store: TaskStore; text: string; executions: readonly ToolExecutionRecord[]; now: Date }): { text?: string; failure?: string; feedback?: string; textOnlyRepair?: boolean } {
+  const observationResults = input.step.executor.role !== "synthesis" ? [] : input.store.listResults(input.task.id).filter(result =>
+    isResearchObservationResult(result) && result.stepId !== undefined && input.step.dependsOn.includes(result.stepId) &&
+    input.store.getStep(result.stepId)?.planRevisionId === input.step.planRevisionId);
+  const observationPages = readTaskResultEvidence(input.executions, input.task.id, "diagnostic");
+  const packets = observationResults.map(result => {
+    const page = observationPages.find(page => page.id === result.id && page.contentHash === result.contentHash);
+    return page === undefined ? undefined : parseResearchObservations(page.content);
+  });
+  if (packets.some(packet => packet === undefined)) return { failure: "unread-source-observations", feedback: "Read every identified runtime source observation result completely, paging until finished. Worker drafts remain unaccepted." };
+  const observationLimits = packets.length === 0 ? "" : "\n\nRuntime evidence limits: Some source findings use captured observations from incomplete workers; those workers did not complete successfully. " +
+    packets.map(packet => `Unresolved checks: ${packet!.unresolvedChecks.join(", ") || "none recorded"}. ${packet!.omittedObservations} observations omitted; excerpts may be truncated.`).join(" ");
+  if (!requiresSourceTable(input.step, input.store)) return { text: input.text + (input.text.includes(observationLimits) ? "" : observationLimits) };
   const table = parseTable(input.text);
   const cited = [...new Set(researchCitationUrls(input.text))];
   if (cited.length === 0) return { failure: "source-citations-missing", feedback: "Cite observed sources beside the claims they support; a Markdown table is optional." };
@@ -30,7 +42,7 @@ export function groundResearchResult(input: { task: Task; step: TaskStep; store:
     const ids = new Set(input.step.dependsOn);
     const accepted = input.store.listResults(input.task.id).filter((result) => result.status === "available" && result.disposition === "accepted" && result.stepId !== undefined && ids.has(result.stepId));
     const read = readTaskResultEvidence(input.executions, input.task.id);
-    if (accepted.length === 0 || accepted.some((result) => !read.some((page) => page.id === result.id && page.contentHash === result.contentHash))) return { failure: "unread-worker-results" };
+    if ((accepted.length === 0 && packets.length === 0) || accepted.some((result) => !read.some((page) => page.id === result.id && page.contentHash === result.contentHash))) return { failure: "unread-worker-results" };
     for (const result of accepted) {
       const worker = parseTable(read.find((page) => page.id === result.id)!.content);
       if (worker === undefined || worker.rows.some((row) => row.retrieved === "unknown")) return { failure: "worker-source-table-missing" };
@@ -39,6 +51,19 @@ export function groundResearchResult(input: { task: Task; step: TaskStep; store:
         if (!sources.has(row.url)) sources.set(row.url, row);
       }
       if (!worker.rows.some((row) => cited.includes(row.url))) return { failure: "worker-source-coverage-missing" };
+    }
+    for (const packet of packets) {
+      for (const observation of packet!.observations) {
+        if (!["web.search", "web.extract"].includes(observation.tool)) continue;
+        const url = httpUrl(observation.reference);
+        if (url === undefined) continue;
+        const row: SourceRow = { url, published: "unknown", retrieved: "unknown",
+          access: observation.tool === "web.search" ? "captured search snippet" : "captured extract; full text unverified",
+          claim: "See narrative; derived from runtime source excerpt, not accepted worker conclusions",
+          limitation: `Incomplete worker; ${observation.truncated ? "truncated excerpt" : "captured excerpt"}. Unresolved checks: ${packet!.unresolvedChecks.join(", ") || "none recorded"}` };
+        acceptedRows.push(row);
+        if (!sources.has(url)) sources.set(url, row);
+      }
     }
     for (const step of dependencies) {
       if (step === null || step.status !== "completed" || !accepted.some((result) => result.stepId === step.id)) {
@@ -49,7 +74,7 @@ export function groundResearchResult(input: { task: Task; step: TaskStep; store:
     for (const [url, source] of observedSources(input.executions, input.now)) sources.set(url, source);
   }
   const unobserved = [...new Set(cited.filter(url => !sources.has(url)))];
-  if (unobserved.length > 0) return { failure: "unobserved-source",
+  if (unobserved.length > 0) return { failure: "unobserved-source", textOnlyRepair: unobserved.every(url => /(?:\.\.\.|…)/u.test(new URL(url).pathname)),
     feedback: `These cited URLs have no successful source observation: ${unobserved.slice(0, 8).join(", ")}. Verify them with allowed tools, replace them with observed supporting sources, or remove unsupported claims. A failed retrieval is a limitation, not evidence. Return only the corrected report; do not repeat rejected URLs in explanations of removed citations.` };
   // Observations are runtime-owned; prose and claim notes remain model-authored.
   // Synthesis retains the original worker limitations independently of paraphrasing.
@@ -67,8 +92,8 @@ export function groundResearchResult(input: { task: Task; step: TaskStep; store:
   const rendered = [SOURCE_HEADER, "| --- | --- | --- | --- | --- | --- |", ...rows.map((row) => `| ${row.url} | ${row.published} | ${row.retrieved} | ${row.access} | ${row.claim.replace(/\|/gu, "\\|")} | ${row.limitation.replace(/\|/gu, "\\|")} |`)].join("\n");
   if (rendered.length > MAX_TABLE_CHARS) return { failure: "source-notes-limit", feedback: "The retained source notes exceed the result size limit. Use fewer distinct sources while preserving worker scope coverage." };
   const prefix = input.step.executor.role === "synthesis" && missing.length > 0
-    ? `Research coverage is partial. Missing or failed scopes: ${missing.join(", ")}. Conclusions are limited to the accepted evidence.\n\n` : "";
-  return { text: (prefix && !input.text.startsWith(prefix) ? prefix : "") + appendSourceEvidence(input.text, table, rendered) };
+    ? `Research coverage is partial. Missing or failed scopes: ${missing.join(", ")}. Conclusions are limited to accepted results and separately captured source observations; failed checks remain unresolved.\n\n` : "";
+  return { text: (prefix && !input.text.startsWith(prefix) ? prefix : "") + appendSourceEvidence(input.text + (input.text.includes(observationLimits) ? "" : observationLimits), table, rendered) };
 }
 
 function parseTable(text: string): { rows: SourceRow[]; start: number; end: number } | undefined {

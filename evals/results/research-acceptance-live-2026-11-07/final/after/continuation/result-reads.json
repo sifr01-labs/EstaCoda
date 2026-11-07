@@ -1,0 +1,86 @@
+[
+  {
+    "sessionId": "child_2718e93b-b49c-4103-b28e-544dacfc0427",
+    "input": {
+      "task_id": "task_63a934d9-0a10-4166-9270-9afa1356f495",
+      "result_id": "4503addc-e101-42d1-b4e0-b1949b86cb32",
+      "offset": 0,
+      "max_chars": 20000
+    },
+    "ok": true,
+    "metadata": {
+      "primary": false,
+      "taskId": "task_63a934d9-0a10-4166-9270-9afa1356f495",
+      "resultId": "4503addc-e101-42d1-b4e0-b1949b86cb32",
+      "resultHandle": "task-result:adcc2f5d-9987-40b3-9560-18bd4e62487e",
+      "kind": "json",
+      "disposition": "diagnostic",
+      "diagnosticWarning": "The Attempt failed. This output may be incomplete and was not accepted as the successful Step result.",
+      "mimeType": "application/vnd.estacoda.research-observations+json",
+      "contentHash": "sha256:b7b904f38b70d4346b4e846beafb5f47694f158c61940f0fe67d301557cadb58",
+      "byteLength": 37244,
+      "offset": 0,
+      "nextOffset": 20000,
+      "totalChars": 37158,
+      "hasMore": true,
+      "retainedOutput": true,
+      "retentionLimited": false,
+      "observationMessageId": "e8fa1364-2f61-4dd0-85f2-3d4b248a5729",
+      "observationSessionId": "child_2718e93b-b49c-4103-b28e-544dacfc0427"
+    }
+  },
+  {
+    "sessionId": "child_2718e93b-b49c-4103-b28e-544dacfc0427",
+    "input": {
+      "task_id": "task_63a934d9-0a10-4166-9270-9afa1356f495",
+      "result_id": "4503addc-e101-42d1-b4e0-b1949b86cb32",
+      "offset": 20000,
+      "max_chars": 20000
+    },
+    "ok": true,
+    "metadata": {
+      "primary": false,
+      "taskId": "task_63a934d9-0a10-4166-9270-9afa1356f495",
+      "resultId": "4503addc-e101-42d1-b4e0-b1949b86cb32",
+      "resultHandle": "task-result:adcc2f5d-9987-40b3-9560-18bd4e62487e",
+      "kind": "json",
+      "disposition": "diagnostic",
+      "diagnosticWarning": "The Attempt failed. This output may be incomplete and was not accepted as the successful Step result.",
+      "mimeType": "application/vnd.estacoda.research-observations+json",
+      "contentHash": "sha256:b7b904f38b70d4346b4e846beafb5f47694f158c61940f0fe67d301557cadb58",
+      "byteLength": 37244,
+      "offset": 20000,
+      "totalChars": 37158,
+      "hasMore": false,
+      "retainedOutput": true,
+      "retentionLimited": false,
+      "observationMessageId": "3e8b29cc-82ec-40d5-b7f9-4da5f11fe4b3",
+      "observationSessionId": "child_2718e93b-b49c-4103-b28e-544dacfc0427"
+    }
+  },
+  {
+    "sessionId": "child_2718e93b-b49c-4103-b28e-544dacfc0427",
+    "input": {
+      "task_id": "task_63a934d9-0a10-4166-9270-9afa1356f495",
+      "result_id": "668a22ac-ff07-4e64-b6f6-baa981b95b33",
+      "offset": 0,
+      "max_chars": 20000
+    },
+    "ok": true,
+    "metadata": {
+      "primary": false,
+      "taskId": "task_63a934d9-0a10-4166-9270-9afa1356f495",
+      "resultId": "668a22ac-ff07-4e64-b6f6-baa981b95b33",
+      "resultHandle": "task-result:9e40de03-ccc8-4a9e-9f33-be02cbf50f3e",
+      "kind": "text",
+      "disposition": "diagnostic",
+      "diagnosticWarning": "The Attempt failed. This output may be incomplete and was not accepted as the successful Step result.",
+      "mimeType": "text/plain; charset=utf-8",
+      "contentHash": "sha256:9ae469fdab319d0ef8486ff960f7309a574fd591946bfe7618a046357837a979",
+      "byteLength": 11923,
+      "offset": 0,
+      "totalChars": 11903,
+      "hasMore": false
+    }
+  }
+]

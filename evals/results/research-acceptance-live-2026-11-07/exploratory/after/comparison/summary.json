@@ -1,0 +1,208 @@
+{
+  "arm": "after",
+  "test": "comparison",
+  "foregroundOutcome": "partially_completed",
+  "elapsedMs": 505388,
+  "providerCalls": 96,
+  "inputTokens": 2081787,
+  "outputTokens": 22614,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "completed",
+      "settlementDurationMs": 449402,
+      "steps": [
+        {
+          "id": "step_981ef0a9-bd52-438c-84cc-87a3429c0421",
+          "title": "Delegated work 1",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 29,
+              "totalTokens": 652237
+            }
+          ],
+          "results": [
+            {
+              "id": "cfa89dc4-ffb2-4f68-a3f8-120893fc7b9e",
+              "kind": "text",
+              "mimeType": "text/plain; charset=utf-8",
+              "disposition": "accepted",
+              "bytes": 11884,
+              "sha256": "sha256:b28458e2e6f5c9d6b6bbecd226a3f9324289eab0958c9f20c230fffdb9979d2e"
+            }
+          ]
+        },
+        {
+          "id": "step_dbbe57e4-bc1e-440b-a1d9-399b8b44d5c8",
+          "title": "Delegated work 2",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 27,
+              "totalTokens": 633788
+            }
+          ],
+          "results": [
+            {
+              "id": "0f6b815e-5ba9-467c-8c1e-b4da64a69574",
+              "kind": "text",
+              "mimeType": "text/plain; charset=utf-8",
+              "disposition": "accepted",
+              "bytes": 11694,
+              "sha256": "sha256:bc7865d75d9762eb4c76b6f10f2c105beb0741faadf4581cf602f2fe92bf9df2"
+            }
+          ]
+        },
+        {
+          "id": "step_f4176790-e5f3-4ae8-8c0f-d05e5ac2272d",
+          "title": "Delegated work 3",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 24,
+              "totalTokens": 582401
+            }
+          ],
+          "results": [
+            {
+              "id": "ebdeae7b-7859-4777-ae1c-f0034a74cb60",
+              "kind": "text",
+              "mimeType": "text/plain; charset=utf-8",
+              "disposition": "accepted",
+              "bytes": 19617,
+              "sha256": "sha256:3f3385e315f4ff7a3db7ff25de2364ce6e0bdb6abbf711b74b5a8759747e252f"
+            }
+          ]
+        },
+        {
+          "id": "step_2f966116-7ef4-40bb-a8a5-4e5f3bf9153c",
+          "title": "Synthesize delegated results",
+          "role": "synthesis",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 4,
+              "totalTokens": 57402
+            }
+          ],
+          "results": [
+            {
+              "id": "45f26c8d-3afc-4fad-9274-fa552e33d061",
+              "kind": "text",
+              "mimeType": "text/plain; charset=utf-8",
+              "disposition": "accepted",
+              "bytes": 34797,
+              "sha256": "sha256:2f6b6a7318e4e4ad8fb2cab3df5b60d57e3943c7c124b96f67a4d237cce1d8ff"
+            }
+          ]
+        },
+        {
+          "id": "step_a91a94eb-07ac-4b9c-a380-fd309ef9dbeb",
+          "title": "Save and verify research report",
+          "role": "report-delivery",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 0,
+              "totalTokens": 0
+            }
+          ],
+          "results": [
+            {
+              "id": "2530d3cf-553a-4921-970d-519f50617cb1",
+              "kind": "text",
+              "mimeType": "text/plain; charset=utf-8",
+              "disposition": "accepted",
+              "bytes": 74,
+              "sha256": "sha256:66d7b6de1467f2571902793df290f9b757dbc5aa68333e5b33a8654db420176c"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "reports": [
+    {
+      "path": "reports/superagent-vs-estacoda.md",
+      "bytes": 34797,
+      "sha256": "2f6b6a7318e4e4ad8fb2cab3df5b60d57e3943c7c124b96f67a4d237cce1d8ff",
+      "matchesAcceptedResult": true
+    }
+  ],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "pendingReviews": 0,
+    "drafts": [
+      {
+        "status": "proposed",
+        "attempts": 1,
+        "proposalCreated": true
+      }
+    ],
+    "observations": [
+      {
+        "sessionId": "child_e4b67ab1-a2f2-46c0-9c87-b6e6e14e9958",
+        "outcome": "partial",
+        "timestamp": "2026-11-07T00:11:01.262Z"
+      },
+      {
+        "sessionId": "ff78e722-d239-434e-9a63-547b806e2840",
+        "outcome": "succeeded",
+        "settledTasks": {
+          "id": "2cb5b3e7eaf93c47269a1d9c87b49dae1d2014b73ab7bef6a78770494d133e2a",
+          "taskIds": [
+            "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30"
+          ],
+          "failures": [],
+          "acceptedResults": 5,
+          "diagnosticResults": 0,
+          "results": [
+            {
+              "taskId": "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30",
+              "resultId": "0f6b815e-5ba9-467c-8c1e-b4da64a69574",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30",
+              "resultId": "cfa89dc4-ffb2-4f68-a3f8-120893fc7b9e",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30",
+              "resultId": "ebdeae7b-7859-4777-ae1c-f0034a74cb60",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30",
+              "resultId": "45f26c8d-3afc-4fad-9274-fa552e33d061",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_1a2eb260-9f66-4c07-b83b-56b1becf4d30",
+              "resultId": "2530d3cf-553a-4921-970d-519f50617cb1",
+              "disposition": "accepted"
+            }
+          ]
+        },
+        "findings": [],
+        "timestamp": "2026-11-07T00:13:37.433Z"
+      }
+    ]
+  }
+}

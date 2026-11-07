@@ -1,0 +1,19 @@
+[
+  {
+    "sessionId": "child_6c4d34b4-6bc2-480e-8f06-fe838c3f6329",
+    "kind": "step-completion-validation",
+    "accepted": false,
+    "feedback": "Declared checks remain unresolved: [\"prototype-policy-tests\"]. Verify those requirements on the current result using an authorized command and reuse the exact verification label. A missing interpreter, crash, failed exit, or stale check is not a passing validation. Reading files or passing a differently named check does not settle these requirements. Do not retry denied actions, bypass permissions, or rerun uncertain side effects. If blocked, report what remains unverified.",
+    "repair": true,
+    "repairAttempt": 0
+  },
+  {
+    "sessionId": "child_6c4d34b4-6bc2-480e-8f06-fe838c3f6329",
+    "kind": "step-completion-validation",
+    "accepted": false,
+    "feedback": "Declared checks remain unresolved: [\"prototype-policy-tests\"]. Verify those requirements on the current result using an authorized command and reuse the exact verification label. A missing interpreter, crash, failed exit, or stale check is not a passing validation. Reading files or passing a differently named check does not settle these requirements. Do not retry denied actions, bypass permissions, or rerun uncertain side effects. If blocked, report what remains unverified.",
+    "repair": false,
+    "repairAttempt": 1,
+    "repairBlockedReason": "task-finalizing"
+  }
+]

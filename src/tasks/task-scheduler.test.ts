@@ -1,3 +1,4 @@
+import { RESEARCH_OBSERVATIONS_MIME } from "./research-observations.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -861,6 +862,24 @@ describe("TaskScheduler", () => {
       .toBe(true);
     expect(transitions.some((event) => event.data.to === "waiting_for_input" && event.stepId === undefined))
       .toBe(true);
+  });
+
+  it.each(["source-observations", "draft", "artifact"])("only host observations unlock synthesis when all workers failed: %s", async kind => {
+    const research = makeStep("research", 0, { failurePolicy: { onAttemptsExhausted: "mark_partial", optional: false } });
+    const synthesis = makeStep("synthesis", 1, { dependsOn: [research.id], executor: { kind: "agent", role: "synthesis" } });
+    store.createTaskGraph(makeGraph([research, synthesis]));
+    const executor = new FakeTaskStepExecutor(input => input.step.id === research.id ? {
+      outcome: "failed", failure: { class: "evidence-contract-unsatisfied", message: "Required tests unavailable", retryable: false, uncertainSideEffects: false },
+      diagnosticResults: [{ kind: kind === "artifact" ? "artifact" : kind === "draft" ? "text" : "json",
+        mimeType: RESEARCH_OBSERVATIONS_MIME, content: "{}" }]
+    } : { outcome: "succeeded", results: [{ kind: "text", content: "Qualified findings; tests unavailable." }] });
+    const scheduler = makeScheduler(executor);
+    await scheduler.runOnce();
+    await scheduler.runOnce();
+    expect(store.getStep(research.id)?.status).toBe("failed");
+    expect(store.getStep(synthesis.id)?.status).toBe(kind === "source-observations" ? "completed" : "skipped");
+    expect(store.getTask("task-alpha")?.status).toBe("partial");
+    expect(store.listResults("task-alpha").filter(r => r.stepId === research.id).every(r => r.disposition === "diagnostic")).toBe(true);
   });
 
   it("settles a Task as partial after an independent Step exhausts mark-partial policy", async () => {

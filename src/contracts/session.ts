@@ -274,6 +274,7 @@ export type SessionEvent =
       feedback?: string;
       repair: boolean;
       repairAttempt: number;
+      repairBlockedReason?: "cancelled" | "not-repairable" | "repair-limit" | "iteration-limit" | "task-finalizing" | "authorization-boundary";
     }
   | { kind: "mcp-connection-status"; connectors: Array<{
       name: string; connected: boolean; available: boolean; schemasRegistered: boolean;

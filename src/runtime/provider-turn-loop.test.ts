@@ -698,6 +698,7 @@ async function createPostToolNudgeHarness(input: {
   noProgressNudgeIteration?: number;
   maxNoProgressIterations?: number;
   finalizationReserveMs?: number;
+  taskExecutionBudget?: ProviderExecutor["taskExecutionBudget"];
   taskExecution?: ProviderTurnLoopOptions["taskExecution"];
   executionPlanReader?: ProviderTurnLoopOptions["executionPlanReader"];
   executionPlanController?: ExecutionPlanController;
@@ -732,7 +733,8 @@ async function createPostToolNudgeHarness(input: {
     return response;
   });
   const providerExecutor = {
-    complete: completeSpy
+    complete: completeSpy,
+    taskExecutionBudget: input.taskExecutionBudget
   } as unknown as ProviderExecutor;
   const sessionDb = new InMemorySessionDB();
   const sessionId = input.sessionId ?? `nudge-session-${Date.now()}-${Math.random()}`;
@@ -5373,6 +5375,30 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(harness.completeSpy).toHaveBeenCalledTimes(2);
   });
 
+  it.each([true, false])("keeps finalization repair inside the existing allowance (textOnly=%s)", async textOnly => {
+    const harness = await createPostToolNudgeHarness({ responses: [providerExecution("bad citation"), providerExecution("corrected citation")], toolSteps: [{}, {}], maxProviderIterations: 3,
+      taskExecution: { taskId: "task", rootTaskId: "task", planRevisionId: "plan", stepId: "step", attemptId: "attempt", originSessionId: "origin" },
+      taskExecutionBudget: () => ({ remainingTokens: 100000, remainingCalls: 2, remainingMs: 60000 }) });
+    const result = await runBasicProviderTurn(harness.loop, { validateCompletion: text => text.startsWith("bad")
+      ? { message: "Unmatched placeholder", repairable: true, ...(textOnly ? { mode: "text-only" as const } : {}) } : undefined });
+    expect(harness.completeSpy).toHaveBeenCalledTimes(textOnly ? 2 : 1);
+    if (textOnly) {
+      expect(result.completionValidationFailure).toBeUndefined();
+      expect(harness.completeSpy.mock.calls.every(call => !call[0]?.tools?.length)).toBe(true);
+    } else expect((await harness.sessionDb.listEvents(harness.sessionId)).find(e => e.kind === "step-completion-validation"))
+      .toMatchObject({ accepted: false, repair: false, repairBlockedReason: "task-finalizing" });
+  });
+
+  it("repairs an exact unmatched URL without exposing tools or changing failed checks", async () => {
+    const harness = await createPostToolNudgeHarness({ responses: [providerExecution("Observed https://observed.example/ and https://github.com/deepseek-ai/...git"),
+      providerExecution("Observed https://observed.example/; tests remain unverified.")], toolSteps: [{}, {}], maxProviderIterations: 3 });
+    const result = await runBasicProviderTurn(harness.loop, { validateCompletion: text => text.includes("...git")
+      ? { message: "Unmatched URL: https://github.com/deepseek-ai/...git. Remove it or replace with an observed URL.", repairable: true, mode: "text-only" } : undefined });
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(result.completionValidationFailure).toBeUndefined();
+    expect(result.providerExecution?.response?.content).toContain("tests remain unverified");
+    expect(harness.completeSpy.mock.calls[1]?.[0]?.tools ?? []).toEqual([]);
+  });
   it("retains the substantive rejected candidate and original defect when the repair exhausts its iterations", async () => {
     const harness = await createPostToolNudgeHarness({ responses: [providerExecution("Useful but unaccepted draft"),
       providerExecution("", [providerToolCall("search", "{}", "web.search")])],
@@ -5477,7 +5503,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(harness.completeSpy).toHaveBeenCalledOnce();
     expect(result.completionValidationFailure).toBe("missing evidence");
     expect((await harness.sessionDb.listEvents(harness.sessionId)).filter(event => event.kind === "step-completion-validation"))
-      .toEqual([expect.objectContaining({ accepted: false, repair: false })]);
+      .toEqual([expect.objectContaining({ accepted: false, repair: false, repairBlockedReason: "authorization-boundary" })]);
   });
 
   it("does not exceed the provider iteration budget for empty initial retries", async () => {

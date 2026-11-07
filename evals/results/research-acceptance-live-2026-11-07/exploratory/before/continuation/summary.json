@@ -1,0 +1,99 @@
+{
+  "arm": "before",
+  "test": "continuation",
+  "foregroundOutcome": "completed",
+  "elapsedMs": 338083,
+  "providerCalls": 22,
+  "inputTokens": 404023,
+  "outputTokens": 15011,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "partial",
+      "settlementDurationMs": 319171,
+      "steps": [
+        {
+          "id": "step_078e2640-0b07-4de9-bda9-39b2e6d94bd3",
+          "title": "Delegated work",
+          "role": "worker",
+          "status": "failed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "failed",
+              "failure": {
+                "class": "evidence-contract-unsatisfied",
+                "message": "Execution stopped (normal). Declared checks remain unresolved: [\"prototype-policy-tests\"]. Verify those requirements on the current result using an authorized command and reuse the exact verification label. A missing interpreter, crash, failed exit, or stale check is not a passing validation. Reading files or passing a differently named check does not settle these requirements. Do not retry denied actions, bypass permissions, or rerun uncertain side effects. If blocked, report what remains unver",
+                "retryable": false,
+                "uncertainSideEffects": false
+              },
+              "providerCalls": 19,
+              "totalTokens": 398188
+            }
+          ],
+          "results": [
+            {
+              "id": "52c58ebb-00bf-4f4d-9a26-6c54d613c735",
+              "kind": "text",
+              "mimeType": "text/plain; charset=utf-8",
+              "disposition": "diagnostic",
+              "bytes": 18612,
+              "sha256": "sha256:3eda36ca5fbf64701101cab139fbe1dcdb18f35c2e84fba22200254dae108cec"
+            }
+          ]
+        },
+        {
+          "id": "step_c296972f-0d85-4172-adda-a0d27a59e930",
+          "title": "Synthesize delegated results",
+          "role": "synthesis",
+          "status": "skipped",
+          "tokenLimit": 1000000,
+          "attempts": [],
+          "results": []
+        },
+        {
+          "id": "step_0f9b79ad-99e8-4baf-b294-f1e3f74298cd",
+          "title": "Save and verify research report",
+          "role": "report-delivery",
+          "status": "skipped",
+          "tokenLimit": 1000000,
+          "attempts": [],
+          "results": []
+        }
+      ]
+    }
+  ],
+  "reports": [],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "pendingReviews": 0,
+    "drafts": [],
+    "observations": [
+      {
+        "sessionId": "4be425a7-c33c-4fdc-8a26-a777a6e35dac",
+        "outcome": "partial",
+        "settledTasks": {
+          "id": "3ba2c0fd3479ff0a51deba2aee6602dfad41dbfed32a2a81bbdf7689ca0e41e1",
+          "taskIds": [
+            "task_237ad79c-d597-4dc9-af3b-787902d5f02e"
+          ],
+          "failures": [
+            "evidence-contract-unsatisfied"
+          ],
+          "acceptedResults": 0,
+          "diagnosticResults": 1,
+          "results": [
+            {
+              "taskId": "task_237ad79c-d597-4dc9-af3b-787902d5f02e",
+              "resultId": "52c58ebb-00bf-4f4d-9a26-6c54d613c735",
+              "disposition": "diagnostic"
+            }
+          ]
+        },
+        "timestamp": "2026-11-07T00:10:55.880Z"
+      }
+    ]
+  }
+}
