@@ -1,14 +1,15 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import {
+  open,
   mkdir as nodeMkdir,
   mkdtemp as nodeMkdtemp,
   readFile as nodeReadFile,
   rm as nodeRm,
   writeFile as nodeWriteFile
 } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir as nodeTmpdir } from "node:os";
+import { basename, join } from "node:path";
+import { homedir, tmpdir as nodeTmpdir } from "node:os";
 
 export interface ChromeLauncherOptions {
   launchExecutable: string;
@@ -19,6 +20,7 @@ export interface ChromeLauncherOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
   platform?: NodeJS.Platform;
+  homeDir?: string;
   getuid?: () => number;
   readFile?: typeof nodeReadFile;
   writeFile?: typeof nodeWriteFile;
@@ -41,6 +43,8 @@ export interface LaunchedChrome {
   kill: () => Promise<void>;
 }
 
+const PORT_TIMEOUT = "Timed out waiting for Chrome DevToolsActivePort";
+const SNAP_EXECUTABLE_HINT = "Set browser.launchExecutable to a working non-Snap Chrome or Chromium binary.";
 const DEFAULT_TIMEOUT_MS = 5_000;
 const POLL_INTERVAL_MS = 25;
 const APPARMOR_RESTRICT_USERNS_PATH = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns";
@@ -78,7 +82,22 @@ export async function launchChrome(options: ChromeLauncherOptions): Promise<Laun
   const fetch = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const createdUserDataDir = options.userDataDir === undefined;
-  const userDataDir = options.userDataDir ?? await mkdtemp(join(tmpdir(), "estacoda-chrome-"));
+  const snap = createdUserDataDir && (options.platform ?? process.platform) === "linux"
+    && await isSnapChromium(launchExecutable);
+  const createProfile = async () => {
+    if (!snap) return mkdtemp(join(tmpdir(), "estacoda-chrome-"));
+
+    // Snap's /tmp is private. Keep preferences, downloads and the handshake
+    // in a fresh profile visible to both Chromium and the host.
+    const shared = join(options.homeDir ?? homedir(), "snap", "chromium", "common");
+    try {
+      await mkdir(shared, { recursive: true, mode: 0o700 });
+      return await mkdtemp(join(shared, "estacoda-chrome-"));
+    } catch (error) {
+      throw new Error("Cannot create a shared Snap Chromium profile. " + SNAP_EXECUTABLE_HINT, { cause: error });
+    }
+  };
+  const userDataDir = options.userDataDir ?? await createProfile();
   let child: ChildProcess | undefined;
   let startupOutput = "";
   const captureStartup = (chunk: Buffer | string) => { startupOutput = (startupOutput + String(chunk)).slice(-4096); };
@@ -155,9 +174,32 @@ export async function launchChrome(options: ChromeLauncherOptions): Promise<Laun
       deleteUserDataDir: createdUserDataDir,
       rm
     });
-    const details = [exit, signal, diagnostic].filter(Boolean).join(", ");
+    const snapHint = snap && error instanceof Error && error.message === PORT_TIMEOUT
+      ? "Snap Chromium did not publish a visible handshake. " + SNAP_EXECUTABLE_HINT : undefined;
+    const details = [exit, signal, diagnostic, snapHint].filter(Boolean).join(", ");
     if (details && error instanceof Error) throw new Error(`${error.message} (${details})`, { cause: error });
     throw error;
+  }
+}
+
+async function isSnapChromium(executable: string): Promise<boolean> {
+  if (executable === "/snap/bin/chromium" || executable === "/var/lib/snapd/snap/bin/chromium") return true;
+  if (basename(executable) !== "chromium-browser") return false;
+
+  // Ubuntu's transitional package installs a shell wrapper. A native Chromium
+  // binary can have the same name, so inspect only a bounded prefix.
+  try {
+    const file = await open(executable, "r");
+    try {
+      const buffer = Buffer.alloc(8192);
+      const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+      const prefix = buffer.toString("utf8", 0, bytesRead);
+      return prefix.startsWith("#!") && /^[ \t]*(?:exec[ \t]+)?["']?\/snap\/bin\/chromium["']?(?:[ \t]|$)/mu.test(prefix);
+    } finally {
+      await file.close();
+    }
+  } catch {
+    return false;
   }
 }
 
@@ -306,7 +348,7 @@ async function waitForDevToolsPort(options: {
   if (lastInvalidPort !== undefined) {
     throw new Error(`Chrome DevToolsActivePort contained an invalid port: ${lastInvalidPort}`);
   }
-  throw new Error("Timed out waiting for Chrome DevToolsActivePort");
+  throw new Error(PORT_TIMEOUT);
 }
 
 function childHasExited(child: ChildProcess): boolean {

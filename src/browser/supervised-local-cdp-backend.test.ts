@@ -274,7 +274,7 @@ describe("supervised local CDP backend", () => {
       available: true,
       capabilities: backend.capabilities,
       sessionState: "backend_available",
-      reason: "Chrome/Chromium auto-launch is ready and will start on the first browser action."
+      reason: "Chrome/Chromium executable found. The first browser action will launch it and verify the DevTools connection."
     });
     expect(findChromiumExecutable).toHaveBeenCalledWith({
       launchExecutable: "/usr/bin/chromium",

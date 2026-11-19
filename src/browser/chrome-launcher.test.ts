@@ -1,4 +1,8 @@
 import { EventEmitter } from "node:events";
+import { writeFileSync } from "node:fs";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { launchChrome } from "./chrome-launcher.js";
@@ -169,6 +173,50 @@ describe("launchChrome", () => {
     expect(harness.mkdtemp).toHaveBeenCalledWith("/tmp/estacoda-chrome-");
     expect(args).toContain("--user-data-dir=/tmp/estacoda-chrome-test");
     expect(launched.userDataDir).toBe("/tmp/estacoda-chrome-test");
+  });
+
+  it("shares the handshake and cleans the profile when Ubuntu's wrapper launches Snap Chromium", async () => {
+    const root = await mkdtemp(join(tmpdir(), "chrome-snap-test-"));
+    const shared = join(root, "snap", "chromium", "common");
+    const wrapper = join(root, "chromium-browser");
+    const harness = createHarness();
+    try {
+      await writeFile(wrapper, '#!/bin/sh\nexec /snap/bin/chromium "$@"\n');
+      // Model Snap's private /tmp: only its common directory is shared with the host.
+      const privateTmp = await mkdtemp(join(root, "private-"));
+      harness.spawn.mockImplementation((_exe, args) => {
+        const profile = args.find(arg => arg.startsWith("--user-data-dir="))!.slice("--user-data-dir=".length);
+        const visible = dirname(profile) === shared ? profile : privateTmp;
+        writeFileSync(join(visible, "DevToolsActivePort"), "4567\n");
+        return harness.child;
+      });
+      const chrome = await launchChrome({
+        ...harness.options, platform: "linux", homeDir: root, launchExecutable: wrapper,
+        tmpdir: () => root, mkdtemp, mkdir, writeFile, readFile, rm, timeoutMs: 500
+      });
+      try {
+        expect(chrome.endpoint).toBe("http://127.0.0.1:4567");
+        expect(harness.fetch).toHaveBeenCalledWith("http://127.0.0.1:4567/json/version", { method: "GET" });
+        expect(dirname(chrome.userDataDir)).toBe(shared);
+        expect(basename(chrome.userDataDir)).toMatch(/^estacoda-chrome-/);
+        await access(join(chrome.userDataDir, "Default", "Preferences"));
+      } finally {
+        await chrome.kill();
+      }
+      await expect(access(chrome.userDataDir)).rejects.toMatchObject({ code: "ENOENT" });
+      await access(shared);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("provides an executable override when the direct Snap launcher times out", async () => {
+    const harness = createHarness({ readFile: async () => { throw missingFileError(); } });
+    await expect(launchChrome({
+      ...harness.options, platform: "linux", launchExecutable: "/snap/bin/chromium", homeDir: "/home/test"
+    })).rejects.toThrow(/Timed out waiting for Chrome DevToolsActivePort.*browser\.launchExecutable/);
+    expect(harness.child.kill).toHaveBeenCalled();
+    expect(harness.rm).toHaveBeenCalled();
   });
 
   it("disables native save prompts in the isolated managed profile", async () => {

@@ -679,8 +679,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       sessionState: "backend_available",
       ...(endpoint === undefined ? {} : { endpoint }),
       reason: endpoint === undefined
-        ? "Chrome/Chromium auto-launch is ready and will start on the first browser action."
-        : "Configured CDP endpoint is unavailable; Chrome/Chromium auto-launch fallback is ready and will start on the first browser action."
+        ? "Chrome/Chromium executable found. The first browser action will launch it and verify the DevTools connection."
+        : "Configured CDP endpoint is unavailable. A fallback executable was found. The first browser action will launch it and verify the DevTools connection."
     };
   };
 
