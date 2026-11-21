@@ -47,6 +47,7 @@ const PORT_TIMEOUT = "Timed out waiting for Chrome DevToolsActivePort";
 const SNAP_EXECUTABLE_HINT = "Set browser.launchExecutable to a working non-Snap Chrome or Chromium binary.";
 const DEFAULT_TIMEOUT_MS = 5_000;
 const POLL_INTERVAL_MS = 25;
+const HTTP_RETRY_INTERVAL_MS = 100;
 const APPARMOR_RESTRICT_USERNS_PATH = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns";
 const DEFAULT_CHROME_FLAGS = [
   "--remote-debugging-port=0",
@@ -139,7 +140,7 @@ export async function launchChrome(options: ChromeLauncherOptions): Promise<Laun
       errorPromise
     ]);
     const endpoint = `http://127.0.0.1:${port}`;
-    await assertHealthy(endpoint, fetch);
+    await waitForDevToolsHttp(endpoint, child, fetch, timeoutMs);
     child.stderr?.off("data", captureStartup);
     child.stderr?.resume();
 
@@ -359,12 +360,41 @@ function isFileMissingError(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
-async function assertHealthy(endpoint: string, fetch: typeof globalThis.fetch): Promise<void> {
-  const response = await fetch(`${endpoint}/json/version`, { method: "GET" });
-  const status = "status" in response ? response.status : undefined;
-  if (!response.ok && (typeof status !== "number" || status < 200 || status >= 300)) {
-    throw new Error(`Chrome DevTools endpoint health check failed for ${endpoint}/json/version`);
+async function waitForDevToolsHttp(
+  endpoint: string,
+  child: ChildProcess,
+  fetch: typeof globalThis.fetch,
+  timeoutMs: number
+): Promise<void> {
+  const url = `${endpoint}/json/version`;
+  const timeout = AbortSignal.timeout(timeoutMs);
+  let lastSocketCode: string | undefined;
+
+  while (!timeout.aborted) {
+    if (childHasExited(child)) throw new Error(`Chrome exited before ${url} was ready`);
+    let response: Response;
+    try {
+      response = await fetch(url, { method: "GET", redirect: "manual", signal: timeout });
+    } catch (error) {
+      if (timeout.aborted) break;
+      const cause = error instanceof Error ? error.cause : undefined;
+      const code = cause && typeof cause === "object" && "code" in cause ? cause.code : undefined;
+      if (code !== "UND_ERR_SOCKET" && code !== "ECONNRESET" && code !== "ECONNREFUSED") throw error;
+      lastSocketCode = code;
+      await delay(Math.min(timeoutMs, HTTP_RETRY_INTERVAL_MS));
+      continue;
+    }
+
+    // Only the headers are needed here. The target manager reads the version payload on attach.
+    await response.body?.cancel();
+    if (!response.ok && !(response.status >= 200 && response.status < 300)) {
+      throw new Error(`Chrome DevTools endpoint health check failed for ${url} (HTTP ${response.status})`);
+    }
+    return;
   }
+  if (childHasExited(child)) throw new Error(`Chrome exited before ${url} was ready`);
+  const detail = lastSocketCode ? ` (last socket error: ${lastSocketCode})` : "";
+  throw new Error(`Timed out waiting for Chrome DevTools HTTP at ${url}${detail}`);
 }
 
 async function cleanupChrome(options: {

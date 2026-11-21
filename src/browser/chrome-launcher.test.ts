@@ -196,7 +196,7 @@ describe("launchChrome", () => {
       });
       try {
         expect(chrome.endpoint).toBe("http://127.0.0.1:4567");
-        expect(harness.fetch).toHaveBeenCalledWith("http://127.0.0.1:4567/json/version", { method: "GET" });
+        expect(harness.fetch).toHaveBeenCalledWith("http://127.0.0.1:4567/json/version", expect.objectContaining({ method: "GET" }));
         expect(dirname(chrome.userDataDir)).toBe(shared);
         expect(basename(chrome.userDataDir)).toMatch(/^estacoda-chrome-/);
         await access(join(chrome.userDataDir, "Default", "Preferences"));
@@ -276,7 +276,54 @@ describe("launchChrome", () => {
 
     await launchChrome(harness.options);
 
-    expect(harness.fetch).toHaveBeenCalledWith("http://127.0.0.1:9333/json/version", { method: "GET" });
+    expect(harness.fetch).toHaveBeenCalledWith("http://127.0.0.1:9333/json/version", expect.objectContaining({ method: "GET", redirect: "manual" }));
+  });
+
+  it("keeps the same Chrome alive when the first DevTools connection closes before replying", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>()
+      .mockRejectedValueOnce(new TypeError("fetch failed", { cause: { code: "UND_ERR_SOCKET" } }))
+      .mockResolvedValueOnce(new Response("{}"));
+    const harness = createHarness({ fetch });
+    const chrome = await launchChrome({ ...harness.options, timeoutMs: 1000 });
+    try {
+      const versionUrl = chrome.endpoint + "/json/version";
+      expect(fetch.mock.calls.map(([url]) => url)).toEqual([versionUrl, versionUrl]);
+      expect(harness.spawn).toHaveBeenCalledTimes(1);
+      expect(harness.child.kill).not.toHaveBeenCalled();
+    } finally {
+      await chrome.kill();
+    }
+  });
+
+  it("reports a persistent closed socket after port discovery and cleans up", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValue(
+      new TypeError("fetch failed", { cause: { code: "UND_ERR_SOCKET", message: "private detail" } })
+    );
+    const harness = createHarness({ fetch });
+    await expect(launchChrome(harness.options)).rejects.toThrow(/Timed out.*\/json\/version.*UND_ERR_SOCKET/);
+    expect(harness.rm).toHaveBeenCalledOnce();
+  });
+
+  it("bounds an unresponsive HTTP probe and removes the managed profile", async () => {
+    const fetch: typeof globalThis.fetch = (_url, init) => new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+    const harness = createHarness({ fetch });
+    await expect(launchChrome(harness.options)).rejects.toThrow(/Timed out.*\/json\/version/);
+    expect(harness.rm).toHaveBeenCalledOnce();
+  });
+
+  it("stops probing when Chrome exits after publishing its port", async () => {
+    const child = new FakeChildProcess();
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+      child.exitCode = 21;
+      throw new TypeError("fetch failed", { cause: { code: "ECONNRESET" } });
+    });
+    const harness = createHarness({ child, fetch });
+    await expect(launchChrome(harness.options)).rejects.toThrow(/Chrome exited before .*json\/version was ready.*exitCode=21/);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(harness.rm).toHaveBeenCalledOnce();
   });
 
   it("injects --no-sandbox when running as root", async () => {

@@ -250,6 +250,8 @@ Structured launch fields are the supported configuration surface:
 
 On Linux, the Chromium Snap launcher and the Ubuntu wrapper that invokes it use a fresh managed profile under `~/snap/chromium/common/`. This lets both processes access the handshake file and download preferences. EstaCoda removes that profile after shutdown. For a Snap startup timeout, set `browser.launchExecutable` to a known working non-Snap binary. Before the first action, auto-launch availability means EstaCoda found a candidate executable. The DevTools connection is verified during launch.
 
+After reading the port, the managed launcher probes `/json/version` on IPv4 loopback. If the connection closes, resets, or is refused during startup, the launcher retries the same port for up to five seconds by default. A stalled request also times out. An HTTP failure or redirect ends the probe immediately.
+
 `browser.launchExecutable` is the preferred executable path. `browser.headless` owns browser-window visibility and defaults to `true`; in visible mode, legacy `--headless` values in structured arguments are ignored. `browser.launchArgs` and `browser.chromeFlags` are structured string arrays. `browser.launchCommand` remains accepted as deprecated compatibility data only. It is never split, guessed, or shell-parsed and should not be used as the normal setup path.
 
 CLI and model-tool updates that specify only browser window behavior preserve the other reviewed browser settings. The Setup Editor continues to apply its complete reviewed browser selection, including intentional field removal when switching modes.
